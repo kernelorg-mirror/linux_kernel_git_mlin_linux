@@ -2377,6 +2377,13 @@ int ata_dev_configure(struct ata_device *dev)
 		if (ata_id_has_da(dev->id))
 			dev->flags |= ATA_DFLAG_DA;
 
+		/*
+		 * TBD:
+		 * seems the "Device Attention" bit is not set on Mint-Spring.
+		 * force it for now and will remove this later.
+		 */
+		dev->flags |= ATA_DFLAG_DA;
+
 		/* print device info to dmesg */
 		if (ata_msg_drv(ap) && print_info)
 			ata_dev_info(dev,
