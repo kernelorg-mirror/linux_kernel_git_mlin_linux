@@ -908,6 +908,36 @@ extern int blk_pre_runtime_suspend(struct request_queue *q);
 extern void blk_post_runtime_suspend(struct request_queue *q, int err);
 extern void blk_pre_runtime_resume(struct request_queue *q);
 extern void blk_post_runtime_resume(struct request_queue *q, int err);
+
+static inline void blk_pm_put_request(struct request_queue *q)
+{
+	if (!(--q->nr_pending) && q->dev)
+		 pm_runtime_mark_last_busy(q->dev);
+}
+
+static inline struct request *blk_pm_peek_request(
+	struct request_queue *q, struct request *rq)
+{
+	if (q->rpm_status == RPM_SUSPENDED ||
+		  (q->rpm_status != RPM_ACTIVE && !(rq->cmd_flags & REQ_PM)))
+		return NULL;
+	else
+		return rq;
+}
+
+static inline void blk_pm_requeue_request(struct request_queue *q)
+{
+	q->nr_pending--;
+}
+
+static inline void blk_pm_add_request(struct request_queue *q,
+	struct request *rq)
+{
+	if (q->nr_pending++ == 0 && !(rq->cmd_flags & REQ_PM) &&
+		    (q->rpm_status == RPM_SUSPENDED ||
+		     q->rpm_status == RPM_SUSPENDING) && q->dev)
+		pm_request_resume(q->dev);
+}
 #else
 static inline void blk_pm_runtime_init(struct request_queue *q,
 	struct device *dev) {}
@@ -918,6 +948,13 @@ static inline int blk_pre_runtime_suspend(struct request_queue *q)
 static inline void blk_post_runtime_suspend(struct request_queue *q, int err) {}
 static inline void blk_pre_runtime_resume(struct request_queue *q) {}
 static inline void blk_post_runtime_resume(struct request_queue *q, int err) {}
+
+static inline void blk_pm_put_request(struct request_queue *q) {}
+static inline struct request *blk_pm_peek_request(
+	struct request_queue *q, struct request *rq) { return rq; }
+static inline void blk_pm_requeue_request(struct request_queue *q) {}
+static inline void blk_pm_add_request(struct request_queue *q,
+	struct request *req) {}
 #endif
 
 /*

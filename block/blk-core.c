@@ -1224,6 +1224,8 @@ void __blk_put_request(struct request_queue *q, struct request *req)
 	if (unlikely(--req->ref_count))
 		return;
 
+	blk_pm_put_request(q);
+
 	elv_completed_request(q, req);
 
 	/* this is a bio leak */
@@ -2012,6 +2014,11 @@ struct request *blk_peek_request(struct request_queue *q)
 	int ret;
 
 	while ((rq = __elv_next_request(q)) != NULL) {
+
+		rq = blk_pm_peek_request(q, rq);
+		if (!rq)
+			break;
+
 		if (!(rq->cmd_flags & REQ_STARTED)) {
 			/*
 			 * This is the first time the device driver
