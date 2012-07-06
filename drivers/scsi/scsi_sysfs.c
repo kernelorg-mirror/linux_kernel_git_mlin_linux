@@ -895,6 +895,8 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 	 */
 	scsi_autopm_get_device(sdev);
 
+	blk_pm_runtime_init(rq, &sdev->sdev_gendev);
+
 	error = device_add(&sdev->sdev_gendev);
 	if (error) {
 		sdev_printk(KERN_INFO, sdev,

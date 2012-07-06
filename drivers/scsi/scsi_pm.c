@@ -74,6 +74,7 @@ static int scsi_bus_suspend_common(struct device *dev, pm_message_t msg)
 
 static int scsi_bus_resume_common(struct device *dev)
 {
+	struct request_queue *q = NULL;
 	int err = 0;
 
 	/*
@@ -84,13 +85,21 @@ static int scsi_bus_resume_common(struct device *dev)
 	 */
 	pm_runtime_get_sync(dev->parent);
 
-	if (scsi_is_sdev_device(dev))
+	if (scsi_is_sdev_device(dev)) {
+		struct scsi_device *sdev = to_scsi_device(dev);
+		q = sdev->request_queue;
+
+		blk_pre_runtime_resume(q);
 		err = scsi_dev_type_resume(dev);
+	}
 	if (err == 0) {
 		pm_runtime_disable(dev);
 		pm_runtime_set_active(dev);
 		pm_runtime_enable(dev);
 	}
+
+	if (q)
+		blk_post_runtime_resume(q, err);
 
 	pm_runtime_put_sync(dev->parent);
 
@@ -143,10 +152,16 @@ static int scsi_runtime_suspend(struct device *dev)
 
 	dev_dbg(dev, "scsi_runtime_suspend\n");
 	if (scsi_is_sdev_device(dev)) {
+		struct scsi_device *sdev = to_scsi_device(dev);
+		struct request_queue *q = sdev->request_queue;
+
+		err = blk_pre_runtime_suspend(q);
+		if (err)
+			return err;
+
 		err = scsi_dev_type_suspend(dev, PMSG_AUTO_SUSPEND);
-		if (err == -EAGAIN)
-			pm_schedule_suspend(dev, jiffies_to_msecs(
-				round_jiffies_up_relative(HZ/10)));
+
+		blk_post_runtime_suspend(q, err);
 	}
 
 	/* Insert hooks here for targets, hosts, and transport classes */
@@ -159,8 +174,14 @@ static int scsi_runtime_resume(struct device *dev)
 	int err = 0;
 
 	dev_dbg(dev, "scsi_runtime_resume\n");
-	if (scsi_is_sdev_device(dev))
+	if (scsi_is_sdev_device(dev)) {
+		struct scsi_device *sdev = to_scsi_device(dev);
+		struct request_queue *q = sdev->request_queue;
+
+		blk_pre_runtime_resume(q);
 		err = scsi_dev_type_resume(dev);
+		blk_post_runtime_resume(q, err);
+	}
 
 	/* Insert hooks here for targets, hosts, and transport classes */
 
@@ -175,9 +196,10 @@ static int scsi_runtime_idle(struct device *dev)
 
 	/* Insert hooks here for targets, hosts, and transport classes */
 
-	if (scsi_is_sdev_device(dev))
-		err = pm_schedule_suspend(dev, 100);
-	else
+	if (scsi_is_sdev_device(dev)) {
+		pm_runtime_mark_last_busy(dev);
+		err = pm_runtime_autosuspend(dev);
+	} else
 		err = pm_runtime_suspend(dev);
 	return err;
 }
