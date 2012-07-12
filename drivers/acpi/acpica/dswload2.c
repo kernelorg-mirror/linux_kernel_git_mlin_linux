@@ -230,6 +230,13 @@ acpi_ds_load2_begin_op(struct acpi_walk_state *walk_state,
 			walk_state->scope_info->common.value = ACPI_TYPE_ANY;
 			break;
 
+		case ACPI_TYPE_METHOD:
+
+			if (node == acpi_gbl_root_node &&
+			    walk_state->parse_flags & ACPI_PARSE_MODULE_LEVEL) {
+				break;
+			}
+
 		default:
 
 			/* All other types are an error */
