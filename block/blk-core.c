@@ -1470,13 +1470,6 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 	struct request *req;
 	unsigned int request_count = 0;
 
-	/*
-	 * low level driver can indicate that it wants pages above a
-	 * certain limit bounced to low memory (ie for highmem, or even
-	 * ISA dma in theory)
-	 */
-	blk_queue_bounce(q, &bio);
-
 	if (bio_integrity_enabled(bio) && bio_integrity_prep(bio)) {
 		bio_endio(bio, -EIO);
 		return;
@@ -1827,6 +1820,13 @@ void generic_make_request(struct bio *bio)
 	current->bio_list = &bio_list_on_stack;
 	do {
 		struct request_queue *q = bdev_get_queue(bio->bi_bdev);
+
+		/*
+		 * low level driver can indicate that it wants pages above a
+		 * certain limit bounced to low memory (ie for highmem, or even
+		 * ISA dma in theory)
+		 */
+		blk_queue_bounce(q, &bio);
 
 		q->make_request_fn(q, bio);
 

@@ -2486,8 +2486,6 @@ static void pkt_make_request(struct request_queue *q, struct bio *bio)
 		goto end_io;
 	}
 
-	blk_queue_bounce(q, &bio);
-
 	do {
 		sector_t zone = ZONE(bio->bi_iter.bi_sector, pd);
 		sector_t last_zone = ZONE(bio_end_sector(bio) - 1, pd);
