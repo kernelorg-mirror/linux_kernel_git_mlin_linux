@@ -779,7 +779,7 @@ static void request_read_error(struct closure *cl)
 		/* XXX: invalidate cache */
 
 		trace_bcache_read_retry(&s->bio.bio);
-		closure_bio_submit(&s->bio.bio, &s->cl, s->d);
+		closure_bio_submit(&s->bio.bio, &s->cl);
 	}
 
 	continue_at(cl, cached_dev_read_complete, NULL);
@@ -903,14 +903,14 @@ static int cached_dev_cache_miss(struct btree *b, struct search *s,
 	bio_get(s->op.cache_bio);
 
 	trace_bcache_cache_miss(s->orig_bio);
-	closure_bio_submit(s->op.cache_bio, &s->cl, s->d);
+	closure_bio_submit(s->op.cache_bio, &s->cl);
 
 	return ret;
 out_put:
 	bio_put(s->op.cache_bio);
 	s->op.cache_bio = NULL;
 out_submit:
-	closure_bio_submit(miss, &s->cl, s->d);
+	closure_bio_submit(miss, &s->cl);
 	return ret;
 }
 
@@ -978,7 +978,7 @@ static void request_write(struct cached_dev *dc, struct search *s)
 						   dc->disk.bio_split);
 
 		trace_bcache_writethrough(s->orig_bio);
-		closure_bio_submit(bio, cl, s->d);
+		closure_bio_submit(bio, cl);
 	} else {
 		s->op.cache_bio = bio;
 		trace_bcache_writeback(s->orig_bio);
@@ -997,7 +997,7 @@ skip:
 	    !blk_queue_discard(bdev_get_queue(dc->bdev)))
 		goto out;
 
-	closure_bio_submit(bio, cl, s->d);
+	closure_bio_submit(bio, cl);
 	goto out;
 }
 
@@ -1014,7 +1014,7 @@ static void request_nodata(struct cached_dev *dc, struct search *s)
 	if (s->op.flush_journal)
 		bch_journal_meta(s->op.c, cl);
 
-	closure_bio_submit(bio, cl, s->d);
+	closure_bio_submit(bio, cl);
 
 	continue_at(cl, cached_dev_bio_complete, NULL);
 }
@@ -1171,7 +1171,7 @@ static void cached_dev_make_request(struct request_queue *q, struct bio *bio)
 		    !blk_queue_discard(bdev_get_queue(dc->bdev)))
 			bio_endio(bio, 0);
 		else
-			bch_generic_make_request(bio, &d->bio_split_hook);
+			generic_make_request(bio);
 	}
 }
 

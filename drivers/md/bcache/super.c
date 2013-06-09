@@ -62,29 +62,6 @@ struct workqueue_struct *bcache_wq;
 
 #define BTREE_MAX_PAGES		(256 * 1024 / PAGE_SIZE)
 
-static void bio_split_pool_free(struct bio_split_pool *p)
-{
-	if (p->bio_split_hook)
-		mempool_destroy(p->bio_split_hook);
-
-	if (p->bio_split)
-		bioset_free(p->bio_split);
-}
-
-static int bio_split_pool_init(struct bio_split_pool *p)
-{
-	p->bio_split = bioset_create(4, 0);
-	if (!p->bio_split)
-		return -ENOMEM;
-
-	p->bio_split_hook = mempool_create_kmalloc_pool(4,
-				sizeof(struct bio_split_hook));
-	if (!p->bio_split_hook)
-		return -ENOMEM;
-
-	return 0;
-}
-
 /* Superblock */
 
 static const char *read_super(struct cache_sb *sb, struct block_device *bdev,
@@ -515,7 +492,7 @@ static void prio_io(struct cache *ca, uint64_t bucket, unsigned long rw)
 	bio->bi_private = ca;
 	bch_bio_map(bio, ca->disk_buckets);
 
-	closure_bio_submit(bio, &ca->prio, ca);
+	closure_bio_submit(bio, &ca->prio);
 	closure_sync(cl);
 }
 
@@ -739,8 +716,6 @@ static void bcache_device_free(struct bcache_device *d)
 		blk_cleanup_queue(d->disk->queue);
 	if (d->disk)
 		put_disk(d->disk);
-
-	bio_split_pool_free(&d->bio_split_hook);
 	if (d->bio_split)
 		bioset_free(d->bio_split);
 
@@ -752,12 +727,7 @@ static int bcache_device_init(struct bcache_device *d, unsigned block_size)
 	struct request_queue *q;
 
 	if (!(d->bio_split = bioset_create(4, offsetof(struct bbio, bio))) ||
-	    bio_split_pool_init(&d->bio_split_hook))
-
-		return -ENOMEM;
-
-	d->disk = alloc_disk(1);
-	if (!d->disk)
+	    !(d->disk = alloc_disk(1)))
 		return -ENOMEM;
 
 	snprintf(d->disk->disk_name, DISK_NAME_LEN, "bcache%i", bcache_minor);
@@ -785,6 +755,7 @@ static int bcache_device_init(struct bcache_device *d, unsigned block_size)
 	q->limits.physical_block_size	= block_size;
 	set_bit(QUEUE_FLAG_NONROT,	&d->disk->queue->queue_flags);
 	set_bit(QUEUE_FLAG_DISCARD,	&d->disk->queue->queue_flags);
+	set_bit(QUEUE_FLAG_LARGEBIOS,	&d->disk->queue->queue_flags);
 
 	return 0;
 }
@@ -1682,8 +1653,6 @@ void bch_cache_release(struct kobject *kobj)
 
 	bch_cache_allocator_exit(ca);
 
-	bio_split_pool_free(&ca->bio_split_hook);
-
 	if (ca->alloc_workqueue)
 		destroy_workqueue(ca->alloc_workqueue);
 
@@ -1743,8 +1712,7 @@ static int cache_alloc(struct cache_sb *sb, struct cache *ca)
 	    !(ca->prio_buckets	= kzalloc(sizeof(uint64_t) * prio_buckets(ca) *
 					  2, GFP_KERNEL)) ||
 	    !(ca->disk_buckets	= alloc_bucket_pages(GFP_KERNEL, ca)) ||
-	    !(ca->alloc_workqueue = alloc_workqueue("bch_allocator", 0, 1)) ||
-	    bio_split_pool_init(&ca->bio_split_hook))
+	    !(ca->alloc_workqueue = alloc_workqueue("bch_allocator", 0, 1)))
 		goto err;
 
 	ca->prio_last_buckets = ca->prio_buckets + prio_buckets(ca);
