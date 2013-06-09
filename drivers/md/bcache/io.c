@@ -11,40 +11,32 @@
 
 static unsigned bch_bio_max_sectors(struct bio *bio)
 {
-	unsigned ret = bio_sectors(bio);
 	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
-	unsigned max_segments = min_t(unsigned, BIO_MAX_PAGES,
-				      queue_max_segments(q));
+	struct bio_vec bv;
+	struct bvec_iter iter;
+	unsigned ret = 0, seg = 0;
 
 	if (bio->bi_rw & REQ_DISCARD)
-		return min(ret, q->limits.max_discard_sectors);
+		return min(bio_sectors(bio), q->limits.max_discard_sectors);
 
-	if (bio_segments(bio) > max_segments ||
-	    q->merge_bvec_fn) {
-		struct bio_vec bv;
-		struct bvec_iter iter;
-		unsigned seg = 0;
+	bio_for_each_segment(bv, bio, iter) {
+		struct bvec_merge_data bvm = {
+			.bi_bdev	= bio->bi_bdev,
+			.bi_sector	= bio->bi_iter.bi_sector,
+			.bi_size	= ret << 9,
+			.bi_rw		= bio->bi_rw,
+		};
 
-		ret = 0;
+		if (seg == min_t(unsigned, BIO_MAX_PAGES,
+				 queue_max_segments(q)))
+			break;
 
-		bio_for_each_segment(bv, bio, iter) {
-			struct bvec_merge_data bvm = {
-				.bi_bdev	= bio->bi_bdev,
-				.bi_sector	= bio->bi_iter.bi_sector,
-				.bi_size	= ret << 9,
-				.bi_rw		= bio->bi_rw,
-			};
+		if (q->merge_bvec_fn &&
+		    q->merge_bvec_fn(q, &bvm, &bv) < (int) bv.bv_len)
+			break;
 
-			if (seg == max_segments)
-				break;
-
-			if (q->merge_bvec_fn &&
-			    q->merge_bvec_fn(q, &bvm, &bv) < (int) bv.bv_len)
-				break;
-
-			seg++;
-			ret += bv.bv_len >> 9;
-		}
+		seg++;
+		ret += bv.bv_len >> 9;
 	}
 
 	ret = min(ret, queue_max_sectors(q));
