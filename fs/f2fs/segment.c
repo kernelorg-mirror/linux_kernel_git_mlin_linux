@@ -735,7 +735,8 @@ static void submit_write_page(struct f2fs_sb_info *sbi, struct page *page,
 alloc_new:
 	if (sbi->bio[type] == NULL) {
 		sbi->bio[type] = f2fs_bio_alloc(bdev, max_hw_blocks(sbi));
-		sbi->bio[type]->bi_sector = SECTOR_FROM_BLOCK(sbi, blk_addr);
+		sbi->bio[type]->bi_iter.bi_sector =
+			SECTOR_FROM_BLOCK(sbi, blk_addr);
 		/*
 		 * The end_io will be assigned at the sumbission phase.
 		 * Until then, let bio_add_page() merge consecutive IOs as much
