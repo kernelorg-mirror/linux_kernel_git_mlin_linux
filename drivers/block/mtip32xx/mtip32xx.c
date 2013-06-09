@@ -3862,7 +3862,8 @@ static void mtip_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct driver_data *dd = queue->queuedata;
 	struct scatterlist *sg;
-	struct bio_vec *bvec;
+	struct bio_vec bvec;
+	struct bvec_iter iter;
 	int nents = 0;
 	int tag = 0, unaligned = 0;
 
@@ -3922,11 +3923,11 @@ static void mtip_make_request(struct request_queue *queue, struct bio *bio)
 		}
 
 		/* Create the scatter list for this bio. */
-		bio_for_each_segment(bvec, bio, nents) {
-			sg_set_page(&sg[nents],
-					bvec->bv_page,
-					bvec->bv_len,
-					bvec->bv_offset);
+		bio_for_each_segment(bvec, bio, iter) {
+			sg_set_page(&sg[nents++],
+					bvec.bv_page,
+					bvec.bv_len,
+					bvec.bv_offset);
 		}
 
 		/* Issue the read/write. */

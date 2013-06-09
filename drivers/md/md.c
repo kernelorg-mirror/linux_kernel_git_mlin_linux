@@ -189,8 +189,8 @@ void md_trim_bio(struct bio *bio, int offset, int size)
 	 * the given offset and size.
 	 * This requires adjusting bi_sector, bi_size, and bi_io_vec
 	 */
-	int i;
-	struct bio_vec *bvec;
+	struct bio_vec bvec;
+	struct bvec_iter iter;
 	int sofar = 0;
 
 	size <<= 9;
@@ -212,14 +212,14 @@ void md_trim_bio(struct bio *bio, int offset, int size)
 		bio->bi_iter.bi_idx = 0;
 	}
 	/* Make sure vcnt and last bv are not too big */
-	bio_for_each_segment(bvec, bio, i) {
-		if (sofar + bvec->bv_len > size)
-			bvec->bv_len = size - sofar;
-		if (bvec->bv_len == 0) {
-			bio->bi_vcnt = i;
+	bio_for_each_segment(bvec, bio, iter) {
+		if (sofar + bvec.bv_len > size)
+			bvec.bv_len = size - sofar;
+		if (bvec.bv_len == 0) {
+			bio->bi_vcnt = iter.bi_idx;
 			break;
 		}
-		sofar += bvec->bv_len;
+		sofar += bvec.bv_len;
 	}
 }
 EXPORT_SYMBOL_GPL(md_trim_bio);

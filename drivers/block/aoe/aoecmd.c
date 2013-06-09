@@ -888,12 +888,12 @@ rqbiocnt(struct request *r)
 static void
 bio_pageinc(struct bio *bio)
 {
-	struct bio_vec *bv;
+	struct bio_vec bv;
 	struct page *page;
-	int i;
+	struct bvec_iter iter;
 
-	bio_for_each_segment(bv, bio, i) {
-		page = bv->bv_page;
+	bio_for_each_segment(bv, bio, iter) {
+		page = bv.bv_page;
 		/* Non-zero page count for non-head members of
 		 * compound pages is no longer allowed by the kernel,
 		 * but this has never been seen here.
@@ -910,11 +910,11 @@ bio_pageinc(struct bio *bio)
 static void
 bio_pagedec(struct bio *bio)
 {
-	struct bio_vec *bv;
-	int i;
+	struct bio_vec bv;
+	struct bvec_iter iter;
 
-	bio_for_each_segment(bv, bio, i)
-		atomic_dec(&bv->bv_page->_count);
+	bio_for_each_segment(bv, bio, iter)
+		atomic_dec(&bv.bv_page->_count);
 }
 
 static void

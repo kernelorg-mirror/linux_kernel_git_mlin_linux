@@ -867,7 +867,7 @@ static void blkif_completion(struct blk_shadow *s, struct blkfront_info *info,
 			     struct blkif_response *bret)
 {
 	int i = 0;
-	struct bio_vec *bvec;
+	struct bio_vec bvec;
 	struct req_iterator iter;
 	unsigned long flags;
 	char *bvec_data;
@@ -882,18 +882,18 @@ static void blkif_completion(struct blk_shadow *s, struct blkfront_info *info,
 		 * to be sure we are copying the data from the right shared page.
 		 */
 		rq_for_each_segment(bvec, s->request, iter) {
-			BUG_ON((bvec->bv_offset + bvec->bv_len) > PAGE_SIZE);
-			if (bvec->bv_offset < offset)
+			BUG_ON((bvec.bv_offset + bvec.bv_len) > PAGE_SIZE);
+			if (bvec.bv_offset < offset)
 				i++;
 			BUG_ON(i >= s->req.u.rw.nr_segments);
 			shared_data = kmap_atomic(
 				pfn_to_page(s->grants_used[i]->pfn));
-			bvec_data = bvec_kmap_irq(bvec, &flags);
-			memcpy(bvec_data, shared_data + bvec->bv_offset,
-				bvec->bv_len);
+			bvec_data = bvec_kmap_irq(&bvec, &flags);
+			memcpy(bvec_data, shared_data + bvec.bv_offset,
+				bvec.bv_len);
 			bvec_kunmap_irq(bvec_data, &flags);
 			kunmap_atomic(shared_data);
-			offset = bvec->bv_offset + bvec->bv_len;
+			offset = bvec.bv_offset + bvec.bv_len;
 		}
 	}
 	/* Add the persistent grant into the list of free grants */
