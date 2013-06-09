@@ -44,9 +44,10 @@ static void write_moving_finish(struct closure *cl)
 {
 	struct moving_io *io = container_of(cl, struct moving_io, s.cl);
 	struct bio *bio = &io->bio.bio;
-	struct bio_vec *bv = bio_iovec_idx(bio, bio->bi_vcnt);
+	struct bio_vec *bv;
+	int i;
 
-	while (bv-- != bio->bi_io_vec)
+	bio_for_each_segment_all(bv, bio, i)
 		__free_page(bv->bv_page);
 
 	pr_debug("%s %s", io->s.op.insert_collision
@@ -159,7 +160,7 @@ static void read_moving(struct closure *cl)
 		bio->bi_rw	= READ;
 		bio->bi_end_io	= read_moving_endio;
 
-		if (bch_bio_alloc_pages(bio, GFP_KERNEL))
+		if (bio_alloc_pages(bio, GFP_KERNEL))
 			goto err;
 
 		pr_debug("%s", pkey(&w->key));
