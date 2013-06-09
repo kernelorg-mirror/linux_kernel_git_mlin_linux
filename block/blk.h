@@ -130,6 +130,9 @@ static inline int blk_should_fake_timeout(struct request_queue *q)
 }
 #endif
 
+struct bio *blk_bio_segment_split(struct request_queue *q, struct bio *bio,
+				  struct bio_set *bs);
+
 int ll_back_merge_fn(struct request_queue *q, struct request *req,
 		     struct bio *bio);
 int ll_front_merge_fn(struct request_queue *q, struct request *req, 

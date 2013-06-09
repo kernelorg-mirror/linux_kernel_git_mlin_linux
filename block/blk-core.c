@@ -599,6 +599,10 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 	if (q->id < 0)
 		goto fail_q;
 
+	q->bio_split = bioset_create(4, 0);
+	if (!q->bio_split)
+		goto fail_split;
+
 	q->backing_dev_info.ra_pages =
 			(VM_MAX_READAHEAD * 1024) / PAGE_CACHE_SIZE;
 	q->backing_dev_info.state = 0;
@@ -651,6 +655,8 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 
 fail_id:
 	ida_simple_remove(&blk_queue_ida, q->id);
+fail_split:
+	bioset_free(q->bio_split);
 fail_q:
 	kmem_cache_free(blk_requestq_cachep, q);
 	return NULL;
@@ -1687,15 +1693,6 @@ generic_make_request_checks(struct bio *bio)
 		goto end_io;
 	}
 
-	if (likely(bio_is_rw(bio) &&
-		   nr_sectors > queue_max_hw_sectors(q))) {
-		printk(KERN_ERR "bio too big device %s (%u > %u)\n",
-		       bdevname(bio->bi_bdev, b),
-		       bio_sectors(bio),
-		       queue_max_hw_sectors(q));
-		goto end_io;
-	}
-
 	part = bio->bi_bdev->bd_part;
 	if (should_fail_request(part, bio->bi_iter.bi_size) ||
 	    should_fail_request(&part_to_disk(part)->part0,
@@ -1820,6 +1817,7 @@ void generic_make_request(struct bio *bio)
 	current->bio_list = &bio_list_on_stack;
 	do {
 		struct request_queue *q = bdev_get_queue(bio->bi_bdev);
+		struct bio *split = NULL;
 
 		/*
 		 * low level driver can indicate that it wants pages above a
@@ -1827,6 +1825,14 @@ void generic_make_request(struct bio *bio)
 		 * ISA dma in theory)
 		 */
 		blk_queue_bounce(q, &bio);
+
+		if (!blk_queue_largebios(q))
+			split = blk_bio_segment_split(q, bio, q->bio_split);
+		if (split) {
+			bio_chain(split, bio);
+			bio_list_add(current->bio_list, bio);
+			bio = split;
+		}
 
 		q->make_request_fn(q, bio);
 
