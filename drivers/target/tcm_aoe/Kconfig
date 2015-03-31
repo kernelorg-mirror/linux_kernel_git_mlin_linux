@@ -1,0 +1,4 @@
+config TCM_AOE
+	tristate "TCM_AOE fabric Plugin"
+	help
+	Say Y here to enable the TCM AoE plugin for accessing ATA fabrics in TCM
