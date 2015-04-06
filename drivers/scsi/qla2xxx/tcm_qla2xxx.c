@@ -224,11 +224,6 @@ static u16 tcm_qla2xxx_get_tag(struct se_portal_group *se_tpg)
 	return tpg->lport_tpgt;
 }
 
-static u32 tcm_qla2xxx_get_default_depth(struct se_portal_group *se_tpg)
-{
-	return 1;
-}
-
 static u32 tcm_qla2xxx_get_pr_transport_id(
 	struct se_portal_group *se_tpg,
 	struct se_node_acl *se_nacl,
@@ -342,29 +337,6 @@ static int tcm_qla2xxx_check_prot_fabric_only(struct se_portal_group *se_tpg)
 				struct tcm_qla2xxx_tpg, se_tpg);
 
 	return tpg->tpg_attrib.fabric_prot_type;
-}
-
-static struct se_node_acl *tcm_qla2xxx_alloc_fabric_acl(
-	struct se_portal_group *se_tpg)
-{
-	struct tcm_qla2xxx_nacl *nacl;
-
-	nacl = kzalloc(sizeof(struct tcm_qla2xxx_nacl), GFP_KERNEL);
-	if (!nacl) {
-		pr_err("Unable to allocate struct tcm_qla2xxx_nacl\n");
-		return NULL;
-	}
-
-	return &nacl->se_node_acl;
-}
-
-static void tcm_qla2xxx_release_fabric_acl(
-	struct se_portal_group *se_tpg,
-	struct se_node_acl *se_nacl)
-{
-	struct tcm_qla2xxx_nacl *nacl = container_of(se_nacl,
-			struct tcm_qla2xxx_nacl, se_node_acl);
-	kfree(nacl);
 }
 
 static u32 tcm_qla2xxx_tpg_get_inst_index(struct se_portal_group *se_tpg)
@@ -805,8 +777,6 @@ static void tcm_qla2xxx_clear_nacl_from_fcport_map(struct qla_tgt_sess *sess)
 			       node, GFP_ATOMIC);
 	}
 
-	pr_debug("Removed from fcport_map: %p for WWNN: 0x%016LX, port_id: 0x%06x\n",
-	    se_nacl, nacl->nport_wwnn, nacl->nport_id);
 	/*
 	 * Now clear the se_nacl and session pointers from our HW lport lookup
 	 * table mapping for this initiator's fabric S_ID and LOOP_ID entries.
@@ -851,55 +821,6 @@ static void tcm_qla2xxx_shutdown_sess(struct qla_tgt_sess *sess)
 {
 	assert_spin_locked(&sess->vha->hw->hardware_lock);
 	target_sess_cmd_list_set_waiting(sess->se_sess);
-}
-
-static struct se_node_acl *tcm_qla2xxx_make_nodeacl(
-	struct se_portal_group *se_tpg,
-	struct config_group *group,
-	const char *name)
-{
-	struct se_node_acl *se_nacl, *se_nacl_new;
-	struct tcm_qla2xxx_nacl *nacl;
-	u64 wwnn;
-	u32 qla2xxx_nexus_depth;
-
-	if (tcm_qla2xxx_parse_wwn(name, &wwnn, 1) < 0)
-		return ERR_PTR(-EINVAL);
-
-	se_nacl_new = tcm_qla2xxx_alloc_fabric_acl(se_tpg);
-	if (!se_nacl_new)
-		return ERR_PTR(-ENOMEM);
-/* #warning FIXME: Hardcoded qla2xxx_nexus depth in tcm_qla2xxx_make_nodeacl */
-	qla2xxx_nexus_depth = 1;
-
-	/*
-	 * se_nacl_new may be released by core_tpg_add_initiator_node_acl()
-	 * when converting a NodeACL from demo mode -> explict
-	 */
-	se_nacl = core_tpg_add_initiator_node_acl(se_tpg, se_nacl_new,
-				name, qla2xxx_nexus_depth);
-	if (IS_ERR(se_nacl)) {
-		tcm_qla2xxx_release_fabric_acl(se_tpg, se_nacl_new);
-		return se_nacl;
-	}
-	/*
-	 * Locate our struct tcm_qla2xxx_nacl and set the FC Nport WWPN
-	 */
-	nacl = container_of(se_nacl, struct tcm_qla2xxx_nacl, se_node_acl);
-	nacl->nport_wwnn = wwnn;
-	tcm_qla2xxx_format_wwn(&nacl->nport_name[0], TCM_QLA2XXX_NAMELEN, wwnn);
-
-	return se_nacl;
-}
-
-static void tcm_qla2xxx_drop_nodeacl(struct se_node_acl *se_acl)
-{
-	struct se_portal_group *se_tpg = se_acl->se_tpg;
-	struct tcm_qla2xxx_nacl *nacl = container_of(se_acl,
-				struct tcm_qla2xxx_nacl, se_node_acl);
-
-	core_tpg_del_initiator_node_acl(se_tpg, se_acl, 1);
-	kfree(nacl);
 }
 
 /* Start items for tcm_qla2xxx_tpg_attrib_cit */
@@ -1988,11 +1909,11 @@ static struct configfs_attribute *tcm_qla2xxx_wwn_attrs[] = {
 };
 
 static struct target_core_fabric_ops tcm_qla2xxx_ops = {
+	.node_acl_size			= sizeof(struct tcm_qla2xxx_nacl),
 	.get_fabric_name		= tcm_qla2xxx_get_fabric_name,
 	.get_fabric_proto_ident		= tcm_qla2xxx_get_fabric_proto_ident,
 	.tpg_get_wwn			= tcm_qla2xxx_get_fabric_wwn,
 	.tpg_get_tag			= tcm_qla2xxx_get_tag,
-	.tpg_get_default_depth		= tcm_qla2xxx_get_default_depth,
 	.tpg_get_pr_transport_id	= tcm_qla2xxx_get_pr_transport_id,
 	.tpg_get_pr_transport_id_len	= tcm_qla2xxx_get_pr_transport_id_len,
 	.tpg_parse_pr_out_transport_id	= tcm_qla2xxx_parse_pr_out_transport_id,
@@ -2004,8 +1925,6 @@ static struct target_core_fabric_ops tcm_qla2xxx_ops = {
 					tcm_qla2xxx_check_prod_write_protect,
 	.tpg_check_prot_fabric_only	= tcm_qla2xxx_check_prot_fabric_only,
 	.tpg_check_demo_mode_login_only = tcm_qla2xxx_check_demo_mode_login_only,
-	.tpg_alloc_fabric_acl		= tcm_qla2xxx_alloc_fabric_acl,
-	.tpg_release_fabric_acl		= tcm_qla2xxx_release_fabric_acl,
 	.tpg_get_inst_index		= tcm_qla2xxx_tpg_get_inst_index,
 	.check_stop_free		= tcm_qla2xxx_check_stop_free,
 	.release_cmd			= tcm_qla2xxx_release_cmd,
@@ -2031,20 +1950,14 @@ static struct target_core_fabric_ops tcm_qla2xxx_ops = {
 	.fabric_drop_wwn		= tcm_qla2xxx_drop_lport,
 	.fabric_make_tpg		= tcm_qla2xxx_make_tpg,
 	.fabric_drop_tpg		= tcm_qla2xxx_drop_tpg,
-	.fabric_post_link		= NULL,
-	.fabric_pre_unlink		= NULL,
-	.fabric_make_np			= NULL,
-	.fabric_drop_np			= NULL,
-	.fabric_make_nodeacl		= tcm_qla2xxx_make_nodeacl,
-	.fabric_drop_nodeacl		= tcm_qla2xxx_drop_nodeacl,
 };
 
 static struct target_core_fabric_ops tcm_qla2xxx_npiv_ops = {
+	.node_acl_size			= sizeof(struct tcm_qla2xxx_nacl),
 	.get_fabric_name		= tcm_qla2xxx_npiv_get_fabric_name,
 	.get_fabric_proto_ident		= tcm_qla2xxx_get_fabric_proto_ident,
 	.tpg_get_wwn			= tcm_qla2xxx_get_fabric_wwn,
 	.tpg_get_tag			= tcm_qla2xxx_get_tag,
-	.tpg_get_default_depth		= tcm_qla2xxx_get_default_depth,
 	.tpg_get_pr_transport_id	= tcm_qla2xxx_get_pr_transport_id,
 	.tpg_get_pr_transport_id_len	= tcm_qla2xxx_get_pr_transport_id_len,
 	.tpg_parse_pr_out_transport_id	= tcm_qla2xxx_parse_pr_out_transport_id,
@@ -2054,8 +1967,6 @@ static struct target_core_fabric_ops tcm_qla2xxx_npiv_ops = {
 	.tpg_check_prod_mode_write_protect =
 	    tcm_qla2xxx_check_prod_write_protect,
 	.tpg_check_demo_mode_login_only	= tcm_qla2xxx_check_demo_mode_login_only,
-	.tpg_alloc_fabric_acl		= tcm_qla2xxx_alloc_fabric_acl,
-	.tpg_release_fabric_acl		= tcm_qla2xxx_release_fabric_acl,
 	.tpg_get_inst_index		= tcm_qla2xxx_tpg_get_inst_index,
 	.check_stop_free                = tcm_qla2xxx_check_stop_free,
 	.release_cmd			= tcm_qla2xxx_release_cmd,
@@ -2081,12 +1992,6 @@ static struct target_core_fabric_ops tcm_qla2xxx_npiv_ops = {
 	.fabric_drop_wwn		= tcm_qla2xxx_npiv_drop_lport,
 	.fabric_make_tpg		= tcm_qla2xxx_npiv_make_tpg,
 	.fabric_drop_tpg		= tcm_qla2xxx_drop_tpg,
-	.fabric_post_link		= NULL,
-	.fabric_pre_unlink		= NULL,
-	.fabric_make_np			= NULL,
-	.fabric_drop_np			= NULL,
-	.fabric_make_nodeacl		= tcm_qla2xxx_make_nodeacl,
-	.fabric_drop_nodeacl		= tcm_qla2xxx_drop_nodeacl,
 };
 
 static int tcm_qla2xxx_register_configfs(void)

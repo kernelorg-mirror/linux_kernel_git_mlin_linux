@@ -3417,11 +3417,6 @@ static u16 srpt_get_tag(struct se_portal_group *tpg)
 	return 1;
 }
 
-static u32 srpt_get_default_depth(struct se_portal_group *se_tpg)
-{
-	return 1;
-}
-
 static u32 srpt_get_pr_transport_id(struct se_portal_group *se_tpg,
 				    struct se_node_acl *se_nacl,
 				    struct t10_pr_registration *pr_reg,
@@ -3456,28 +3451,6 @@ static char *srpt_parse_pr_out_transport_id(struct se_portal_group *se_tpg,
 	*out_tid_len = sizeof(struct spc_rdma_transport_id);
 	tr_id = (void *)buf;
 	return (char *)tr_id->i_port_id;
-}
-
-static struct se_node_acl *srpt_alloc_fabric_acl(struct se_portal_group *se_tpg)
-{
-	struct srpt_node_acl *nacl;
-
-	nacl = kzalloc(sizeof(struct srpt_node_acl), GFP_KERNEL);
-	if (!nacl) {
-		printk(KERN_ERR "Unable to allocate struct srpt_node_acl\n");
-		return NULL;
-	}
-
-	return &nacl->nacl;
-}
-
-static void srpt_release_fabric_acl(struct se_portal_group *se_tpg,
-				    struct se_node_acl *se_nacl)
-{
-	struct srpt_node_acl *nacl;
-
-	nacl = container_of(se_nacl, struct srpt_node_acl, nacl);
-	kfree(nacl);
 }
 
 static u32 srpt_tpg_get_inst_index(struct se_portal_group *se_tpg)
@@ -3603,40 +3576,20 @@ out:
  * configfs callback function invoked for
  * mkdir /sys/kernel/config/target/$driver/$port/$tpg/acls/$i_port_id
  */
-static struct se_node_acl *srpt_make_nodeacl(struct se_portal_group *tpg,
-					     struct config_group *group,
-					     const char *name)
+static int srpt_init_nodeacl(struct se_node_acl *se_nacl, const char *name)
 {
-	struct srpt_port *sport = container_of(tpg, struct srpt_port, port_tpg_1);
-	struct se_node_acl *se_nacl, *se_nacl_new;
-	struct srpt_node_acl *nacl;
-	int ret = 0;
-	u32 nexus_depth = 1;
+	struct srpt_port *sport =
+		container_of(se_nacl->se_tpg, struct srpt_port, port_tpg_1);
+	struct srpt_node_acl *nacl =
+		container_of(se_nacl, struct srpt_node_acl, nacl);
 	u8 i_port_id[16];
 
 	if (srpt_parse_i_port_id(i_port_id, name) < 0) {
 		printk(KERN_ERR "invalid initiator port ID %s\n", name);
-		ret = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
-	se_nacl_new = srpt_alloc_fabric_acl(tpg);
-	if (!se_nacl_new) {
-		ret = -ENOMEM;
-		goto err;
-	}
-	/*
-	 * nacl_new may be released by core_tpg_add_initiator_node_acl()
-	 * when converting a node ACL from demo mode to explict
-	 */
-	se_nacl = core_tpg_add_initiator_node_acl(tpg, se_nacl_new, name,
-						  nexus_depth);
-	if (IS_ERR(se_nacl)) {
-		ret = PTR_ERR(se_nacl);
-		goto err;
-	}
 	/* Locate our struct srpt_node_acl and set sdev and i_port_id. */
-	nacl = container_of(se_nacl, struct srpt_node_acl, nacl);
 	memcpy(&nacl->i_port_id[0], &i_port_id[0], 16);
 	nacl->sport = sport;
 
@@ -3644,9 +3597,7 @@ static struct se_node_acl *srpt_make_nodeacl(struct se_portal_group *tpg,
 	list_add_tail(&nacl->list, &sport->port_acl_list);
 	spin_unlock_irq(&sport->port_acl_lock);
 
-	return se_nacl;
-err:
-	return ERR_PTR(ret);
+	return 0;
 }
 
 /*
@@ -3656,17 +3607,13 @@ err:
 static void srpt_drop_nodeacl(struct se_node_acl *se_nacl)
 {
 	struct srpt_node_acl *nacl;
-	struct srpt_device *sdev;
 	struct srpt_port *sport;
 
 	nacl = container_of(se_nacl, struct srpt_node_acl, nacl);
 	sport = nacl->sport;
-	sdev = sport->sdev;
 	spin_lock_irq(&sport->port_acl_lock);
 	list_del(&nacl->list);
 	spin_unlock_irq(&sport->port_acl_lock);
-	core_tpg_del_initiator_node_acl(&sport->port_tpg_1, se_nacl, 1);
-	srpt_release_fabric_acl(NULL, se_nacl);
 }
 
 static ssize_t srpt_tpg_attrib_show_srp_max_rdma_size(
@@ -3920,11 +3867,11 @@ static struct configfs_attribute *srpt_wwn_attrs[] = {
 };
 
 static struct target_core_fabric_ops srpt_template = {
+	.node_acl_size			= sizeof(struct srpt_node_acl),
 	.get_fabric_name		= srpt_get_fabric_name,
 	.get_fabric_proto_ident		= srpt_get_fabric_proto_ident,
 	.tpg_get_wwn			= srpt_get_fabric_wwn,
 	.tpg_get_tag			= srpt_get_tag,
-	.tpg_get_default_depth		= srpt_get_default_depth,
 	.tpg_get_pr_transport_id	= srpt_get_pr_transport_id,
 	.tpg_get_pr_transport_id_len	= srpt_get_pr_transport_id_len,
 	.tpg_parse_pr_out_transport_id	= srpt_parse_pr_out_transport_id,
@@ -3932,8 +3879,6 @@ static struct target_core_fabric_ops srpt_template = {
 	.tpg_check_demo_mode_cache	= srpt_check_true,
 	.tpg_check_demo_mode_write_protect = srpt_check_true,
 	.tpg_check_prod_mode_write_protect = srpt_check_false,
-	.tpg_alloc_fabric_acl		= srpt_alloc_fabric_acl,
-	.tpg_release_fabric_acl		= srpt_release_fabric_acl,
 	.tpg_get_inst_index		= srpt_tpg_get_inst_index,
 	.release_cmd			= srpt_release_cmd,
 	.check_stop_free		= srpt_check_stop_free,
@@ -3962,7 +3907,7 @@ static struct target_core_fabric_ops srpt_template = {
 	.fabric_pre_unlink		= NULL,
 	.fabric_make_np			= NULL,
 	.fabric_drop_np			= NULL,
-	.fabric_make_nodeacl		= srpt_make_nodeacl,
+	.fabric_init_nodeacl		= srpt_init_nodeacl,
 	.fabric_drop_nodeacl		= srpt_drop_nodeacl,
 };
 

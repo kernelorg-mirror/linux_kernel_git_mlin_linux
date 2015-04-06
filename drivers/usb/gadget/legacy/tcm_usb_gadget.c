@@ -1307,11 +1307,6 @@ static u16 usbg_get_tag(struct se_portal_group *se_tpg)
 	return tpg->tport_tpgt;
 }
 
-static u32 usbg_get_default_depth(struct se_portal_group *se_tpg)
-{
-	return 1;
-}
-
 static u32 usbg_get_pr_transport_id(
 	struct se_portal_group *se_tpg,
 	struct se_node_acl *se_nacl,
@@ -1376,26 +1371,6 @@ static char *usbg_parse_pr_out_transport_id(
 	}
 
 	return tid;
-}
-
-static struct se_node_acl *usbg_alloc_fabric_acl(struct se_portal_group *se_tpg)
-{
-	struct usbg_nacl *nacl;
-
-	nacl = kzalloc(sizeof(struct usbg_nacl), GFP_KERNEL);
-	if (!nacl)
-		return NULL;
-
-	return &nacl->se_node_acl;
-}
-
-static void usbg_release_fabric_acl(
-	struct se_portal_group *se_tpg,
-	struct se_node_acl *se_nacl)
-{
-	struct usbg_nacl *nacl = container_of(se_nacl,
-			struct usbg_nacl, se_node_acl);
-	kfree(nacl);
 }
 
 static u32 usbg_tpg_get_inst_index(struct se_portal_group *se_tpg)
@@ -1487,52 +1462,6 @@ static const char *usbg_check_wwn(const char *name)
 	if (len == 0 || len > USBG_NAMELEN - 1)
 		return NULL;
 	return n;
-}
-
-static struct se_node_acl *usbg_make_nodeacl(
-	struct se_portal_group *se_tpg,
-	struct config_group *group,
-	const char *name)
-{
-	struct se_node_acl *se_nacl, *se_nacl_new;
-	struct usbg_nacl *nacl;
-	u64 wwpn = 0;
-	u32 nexus_depth;
-	const char *wnn_name;
-
-	wnn_name = usbg_check_wwn(name);
-	if (!wnn_name)
-		return ERR_PTR(-EINVAL);
-	se_nacl_new = usbg_alloc_fabric_acl(se_tpg);
-	if (!(se_nacl_new))
-		return ERR_PTR(-ENOMEM);
-
-	nexus_depth = 1;
-	/*
-	 * se_nacl_new may be released by core_tpg_add_initiator_node_acl()
-	 * when converting a NodeACL from demo mode -> explict
-	 */
-	se_nacl = core_tpg_add_initiator_node_acl(se_tpg, se_nacl_new,
-				name, nexus_depth);
-	if (IS_ERR(se_nacl)) {
-		usbg_release_fabric_acl(se_tpg, se_nacl_new);
-		return se_nacl;
-	}
-	/*
-	 * Locate our struct usbg_nacl and set the FC Nport WWPN
-	 */
-	nacl = container_of(se_nacl, struct usbg_nacl, se_node_acl);
-	nacl->iport_wwpn = wwpn;
-	snprintf(nacl->iport_name, sizeof(nacl->iport_name), "%s", name);
-	return se_nacl;
-}
-
-static void usbg_drop_nodeacl(struct se_node_acl *se_acl)
-{
-	struct usbg_nacl *nacl = container_of(se_acl,
-				struct usbg_nacl, se_node_acl);
-	core_tpg_del_initiator_node_acl(se_acl->se_tpg, se_acl, 1);
-	kfree(nacl);
 }
 
 struct usbg_tpg *the_only_tpg_I_currently_have;
@@ -1870,7 +1799,6 @@ static struct target_core_fabric_ops usbg_ops = {
 	.get_fabric_proto_ident		= usbg_get_fabric_proto_ident,
 	.tpg_get_wwn			= usbg_get_fabric_wwn,
 	.tpg_get_tag			= usbg_get_tag,
-	.tpg_get_default_depth		= usbg_get_default_depth,
 	.tpg_get_pr_transport_id	= usbg_get_pr_transport_id,
 	.tpg_get_pr_transport_id_len	= usbg_get_pr_transport_id_len,
 	.tpg_parse_pr_out_transport_id	= usbg_parse_pr_out_transport_id,
@@ -1878,8 +1806,6 @@ static struct target_core_fabric_ops usbg_ops = {
 	.tpg_check_demo_mode_cache	= usbg_check_false,
 	.tpg_check_demo_mode_write_protect = usbg_check_false,
 	.tpg_check_prod_mode_write_protect = usbg_check_false,
-	.tpg_alloc_fabric_acl		= usbg_alloc_fabric_acl,
-	.tpg_release_fabric_acl		= usbg_release_fabric_acl,
 	.tpg_get_inst_index		= usbg_tpg_get_inst_index,
 	.release_cmd			= usbg_release_cmd,
 	.shutdown_session		= usbg_shutdown_session,
@@ -1903,10 +1829,6 @@ static struct target_core_fabric_ops usbg_ops = {
 	.fabric_drop_tpg		= usbg_drop_tpg,
 	.fabric_post_link		= usbg_port_link,
 	.fabric_pre_unlink		= usbg_port_unlink,
-	.fabric_make_np			= NULL,
-	.fabric_drop_np			= NULL,
-	.fabric_make_nodeacl		= usbg_make_nodeacl,
-	.fabric_drop_nodeacl		= usbg_drop_nodeacl,
 };
 
 static int usbg_register_configfs(void)

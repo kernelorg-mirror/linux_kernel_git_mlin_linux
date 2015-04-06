@@ -391,10 +391,6 @@ static int target_fabric_tf_ops_check(
 		pr_err("Missing tfo->tpg_get_tag()\n");
 		return -EINVAL;
 	}
-	if (!tfo->tpg_get_default_depth) {
-		pr_err("Missing tfo->tpg_get_default_depth()\n");
-		return -EINVAL;
-	}
 	if (!tfo->tpg_get_pr_transport_id) {
 		pr_err("Missing tfo->tpg_get_pr_transport_id()\n");
 		return -EINVAL;
@@ -417,14 +413,6 @@ static int target_fabric_tf_ops_check(
 	}
 	if (!tfo->tpg_check_prod_mode_write_protect) {
 		pr_err("Missing tfo->tpg_check_prod_mode_write_protect()\n");
-		return -EINVAL;
-	}
-	if (!tfo->tpg_alloc_fabric_acl) {
-		pr_err("Missing tfo->tpg_alloc_fabric_acl()\n");
-		return -EINVAL;
-	}
-	if (!tfo->tpg_release_fabric_acl) {
-		pr_err("Missing tfo->tpg_release_fabric_acl()\n");
 		return -EINVAL;
 	}
 	if (!tfo->tpg_get_inst_index) {

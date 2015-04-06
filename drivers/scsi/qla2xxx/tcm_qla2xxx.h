@@ -13,18 +13,14 @@
 #include "qla_target.h"
 
 struct tcm_qla2xxx_nacl {
+	struct se_node_acl se_node_acl;
+
 	/* From libfc struct fc_rport->port_id */
 	u32 nport_id;
-	/* Binary World Wide unique Node Name for remote FC Initiator Nport */
-	u64 nport_wwnn;
-	/* ASCII formatted WWPN for FC Initiator Nport */
-	char nport_name[TCM_QLA2XXX_NAMELEN];
 	/* Pointer to qla_tgt_sess */
 	struct qla_tgt_sess *qla_tgt_sess;
 	/* Pointer to TCM FC nexus */
 	struct se_session *nport_nexus;
-	/* Returned by tcm_qla2xxx_make_nodeacl() */
-	struct se_node_acl se_node_acl;
 };
 
 struct tcm_qla2xxx_tpg_attrib {

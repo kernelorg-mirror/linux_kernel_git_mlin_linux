@@ -1708,33 +1708,6 @@ static u16 sbp_get_tag(struct se_portal_group *se_tpg)
 	return tpg->tport_tpgt;
 }
 
-static u32 sbp_get_default_depth(struct se_portal_group *se_tpg)
-{
-	return 1;
-}
-
-static struct se_node_acl *sbp_alloc_fabric_acl(struct se_portal_group *se_tpg)
-{
-	struct sbp_nacl *nacl;
-
-	nacl = kzalloc(sizeof(struct sbp_nacl), GFP_KERNEL);
-	if (!nacl) {
-		pr_err("Unable to allocate struct sbp_nacl\n");
-		return NULL;
-	}
-
-	return &nacl->se_node_acl;
-}
-
-static void sbp_release_fabric_acl(
-	struct se_portal_group *se_tpg,
-	struct se_node_acl *se_nacl)
-{
-	struct sbp_nacl *nacl =
-		container_of(se_nacl, struct sbp_nacl, se_node_acl);
-	kfree(nacl);
-}
-
 static u32 sbp_tpg_get_inst_index(struct se_portal_group *se_tpg)
 {
 	return 1;
@@ -2101,50 +2074,6 @@ static ssize_t sbp_format_wwn(char *buf, size_t len, u64 wwn)
 	return snprintf(buf, len, "%016llx", wwn);
 }
 
-static struct se_node_acl *sbp_make_nodeacl(
-		struct se_portal_group *se_tpg,
-		struct config_group *group,
-		const char *name)
-{
-	struct se_node_acl *se_nacl, *se_nacl_new;
-	struct sbp_nacl *nacl;
-	u64 guid = 0;
-	u32 nexus_depth = 1;
-
-	if (sbp_parse_wwn(name, &guid) < 0)
-		return ERR_PTR(-EINVAL);
-
-	se_nacl_new = sbp_alloc_fabric_acl(se_tpg);
-	if (!se_nacl_new)
-		return ERR_PTR(-ENOMEM);
-
-	/*
-	 * se_nacl_new may be released by core_tpg_add_initiator_node_acl()
-	 * when converting a NodeACL from demo mode -> explict
-	 */
-	se_nacl = core_tpg_add_initiator_node_acl(se_tpg, se_nacl_new,
-			name, nexus_depth);
-	if (IS_ERR(se_nacl)) {
-		sbp_release_fabric_acl(se_tpg, se_nacl_new);
-		return se_nacl;
-	}
-
-	nacl = container_of(se_nacl, struct sbp_nacl, se_node_acl);
-	nacl->guid = guid;
-	sbp_format_wwn(nacl->iport_name, SBP_NAMELEN, guid);
-
-	return se_nacl;
-}
-
-static void sbp_drop_nodeacl(struct se_node_acl *se_acl)
-{
-	struct sbp_nacl *nacl =
-		container_of(se_acl, struct sbp_nacl, se_node_acl);
-
-	core_tpg_del_initiator_node_acl(se_acl->se_tpg, se_acl, 1);
-	kfree(nacl);
-}
-
 static int sbp_post_link_lun(
 		struct se_portal_group *se_tpg,
 		struct se_lun *se_lun)
@@ -2508,7 +2437,6 @@ static struct target_core_fabric_ops sbp_ops = {
 	.get_fabric_proto_ident		= sbp_get_fabric_proto_ident,
 	.tpg_get_wwn			= sbp_get_fabric_wwn,
 	.tpg_get_tag			= sbp_get_tag,
-	.tpg_get_default_depth		= sbp_get_default_depth,
 	.tpg_get_pr_transport_id	= sbp_get_pr_transport_id,
 	.tpg_get_pr_transport_id_len	= sbp_get_pr_transport_id_len,
 	.tpg_parse_pr_out_transport_id	= sbp_parse_pr_out_transport_id,
@@ -2516,8 +2444,6 @@ static struct target_core_fabric_ops sbp_ops = {
 	.tpg_check_demo_mode_cache	= sbp_check_true,
 	.tpg_check_demo_mode_write_protect = sbp_check_false,
 	.tpg_check_prod_mode_write_protect = sbp_check_false,
-	.tpg_alloc_fabric_acl		= sbp_alloc_fabric_acl,
-	.tpg_release_fabric_acl		= sbp_release_fabric_acl,
 	.tpg_get_inst_index		= sbp_tpg_get_inst_index,
 	.release_cmd			= sbp_release_cmd,
 	.shutdown_session		= sbp_shutdown_session,
@@ -2540,10 +2466,6 @@ static struct target_core_fabric_ops sbp_ops = {
 	.fabric_drop_tpg		= sbp_drop_tpg,
 	.fabric_post_link		= sbp_post_link_lun,
 	.fabric_pre_unlink		= sbp_pre_unlink_lun,
-	.fabric_make_np			= NULL,
-	.fabric_drop_np			= NULL,
-	.fabric_make_nodeacl		= sbp_make_nodeacl,
-	.fabric_drop_nodeacl		= sbp_drop_nodeacl,
 };
 
 static int sbp_register_configfs(void)

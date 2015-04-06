@@ -115,15 +115,6 @@ struct vhost_scsi_nexus {
 	struct se_session *tvn_se_sess;
 };
 
-struct vhost_scsi_nacl {
-	/* Binary World Wide unique Port Name for Vhost Initiator port */
-	u64 iport_wwpn;
-	/* ASCII formatted WWPN for Sas Initiator port */
-	char iport_name[VHOST_SCSI_NAMELEN];
-	/* Returned by vhost_scsi_make_nodeacl() */
-	struct se_node_acl se_node_acl;
-};
-
 struct vhost_scsi_tpg {
 	/* Vhost port target portal group tag for TCM */
 	u16 tport_tpgt;
@@ -337,11 +328,6 @@ static u16 vhost_scsi_get_tpgt(struct se_portal_group *se_tpg)
 	return tpg->tport_tpgt;
 }
 
-static u32 vhost_scsi_get_default_depth(struct se_portal_group *se_tpg)
-{
-	return 1;
-}
-
 static u32
 vhost_scsi_get_pr_transport_id(struct se_portal_group *se_tpg,
 			      struct se_node_acl *se_nacl,
@@ -439,29 +425,6 @@ static int vhost_scsi_check_prot_fabric_only(struct se_portal_group *se_tpg)
 				struct vhost_scsi_tpg, se_tpg);
 
 	return tpg->tv_fabric_prot_type;
-}
-
-static struct se_node_acl *
-vhost_scsi_alloc_fabric_acl(struct se_portal_group *se_tpg)
-{
-	struct vhost_scsi_nacl *nacl;
-
-	nacl = kzalloc(sizeof(struct vhost_scsi_nacl), GFP_KERNEL);
-	if (!nacl) {
-		pr_err("Unable to allocate struct vhost_scsi_nacl\n");
-		return NULL;
-	}
-
-	return &nacl->se_node_acl;
-}
-
-static void
-vhost_scsi_release_fabric_acl(struct se_portal_group *se_tpg,
-			     struct se_node_acl *se_nacl)
-{
-	struct vhost_scsi_nacl *nacl = container_of(se_nacl,
-			struct vhost_scsi_nacl, se_node_acl);
-	kfree(nacl);
 }
 
 static u32 vhost_scsi_tpg_get_inst_index(struct se_portal_group *se_tpg)
@@ -1826,50 +1789,6 @@ static void vhost_scsi_port_unlink(struct se_portal_group *se_tpg,
 	mutex_unlock(&vhost_scsi_mutex);
 }
 
-static struct se_node_acl *
-vhost_scsi_make_nodeacl(struct se_portal_group *se_tpg,
-		       struct config_group *group,
-		       const char *name)
-{
-	struct se_node_acl *se_nacl, *se_nacl_new;
-	struct vhost_scsi_nacl *nacl;
-	u64 wwpn = 0;
-	u32 nexus_depth;
-
-	/* vhost_scsi_parse_wwn(name, &wwpn, 1) < 0)
-		return ERR_PTR(-EINVAL); */
-	se_nacl_new = vhost_scsi_alloc_fabric_acl(se_tpg);
-	if (!se_nacl_new)
-		return ERR_PTR(-ENOMEM);
-
-	nexus_depth = 1;
-	/*
-	 * se_nacl_new may be released by core_tpg_add_initiator_node_acl()
-	 * when converting a NodeACL from demo mode -> explict
-	 */
-	se_nacl = core_tpg_add_initiator_node_acl(se_tpg, se_nacl_new,
-				name, nexus_depth);
-	if (IS_ERR(se_nacl)) {
-		vhost_scsi_release_fabric_acl(se_tpg, se_nacl_new);
-		return se_nacl;
-	}
-	/*
-	 * Locate our struct vhost_scsi_nacl and set the FC Nport WWPN
-	 */
-	nacl = container_of(se_nacl, struct vhost_scsi_nacl, se_node_acl);
-	nacl->iport_wwpn = wwpn;
-
-	return se_nacl;
-}
-
-static void vhost_scsi_drop_nodeacl(struct se_node_acl *se_acl)
-{
-	struct vhost_scsi_nacl *nacl = container_of(se_acl,
-				struct vhost_scsi_nacl, se_node_acl);
-	core_tpg_del_initiator_node_acl(se_acl->se_tpg, se_acl, 1);
-	kfree(nacl);
-}
-
 static void vhost_scsi_free_cmd_map_res(struct vhost_scsi_nexus *nexus,
 				       struct se_session *se_sess)
 {
@@ -2331,7 +2250,6 @@ static struct target_core_fabric_ops vhost_scsi_ops = {
 	.get_fabric_proto_ident		= vhost_scsi_get_fabric_proto_ident,
 	.tpg_get_wwn			= vhost_scsi_get_fabric_wwn,
 	.tpg_get_tag			= vhost_scsi_get_tpgt,
-	.tpg_get_default_depth		= vhost_scsi_get_default_depth,
 	.tpg_get_pr_transport_id	= vhost_scsi_get_pr_transport_id,
 	.tpg_get_pr_transport_id_len	= vhost_scsi_get_pr_transport_id_len,
 	.tpg_parse_pr_out_transport_id	= vhost_scsi_parse_pr_out_transport_id,
@@ -2340,8 +2258,6 @@ static struct target_core_fabric_ops vhost_scsi_ops = {
 	.tpg_check_demo_mode_write_protect = vhost_scsi_check_false,
 	.tpg_check_prod_mode_write_protect = vhost_scsi_check_false,
 	.tpg_check_prot_fabric_only	= vhost_scsi_check_prot_fabric_only,
-	.tpg_alloc_fabric_acl		= vhost_scsi_alloc_fabric_acl,
-	.tpg_release_fabric_acl		= vhost_scsi_release_fabric_acl,
 	.tpg_get_inst_index		= vhost_scsi_tpg_get_inst_index,
 	.release_cmd			= vhost_scsi_release_cmd,
 	.check_stop_free		= vhost_scsi_check_stop_free,
@@ -2367,10 +2283,6 @@ static struct target_core_fabric_ops vhost_scsi_ops = {
 	.fabric_drop_tpg		= vhost_scsi_drop_tpg,
 	.fabric_post_link		= vhost_scsi_port_link,
 	.fabric_pre_unlink		= vhost_scsi_port_unlink,
-	.fabric_make_np			= NULL,
-	.fabric_drop_np			= NULL,
-	.fabric_make_nodeacl		= vhost_scsi_make_nodeacl,
-	.fabric_drop_nodeacl		= vhost_scsi_drop_nodeacl,
 };
 
 static int vhost_scsi_register_configfs(void)

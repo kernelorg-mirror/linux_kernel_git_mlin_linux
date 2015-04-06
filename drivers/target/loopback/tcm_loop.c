@@ -567,11 +567,6 @@ static u16 tcm_loop_get_tag(struct se_portal_group *se_tpg)
 	return tl_tpg->tl_tpgt;
 }
 
-static u32 tcm_loop_get_default_depth(struct se_portal_group *se_tpg)
-{
-	return 1;
-}
-
 static u32 tcm_loop_get_pr_transport_id(
 	struct se_portal_group *se_tpg,
 	struct se_node_acl *se_nacl,
@@ -702,30 +697,6 @@ static int tcm_loop_check_prot_fabric_only(struct se_portal_group *se_tpg)
 	struct tcm_loop_tpg *tl_tpg = container_of(se_tpg, struct tcm_loop_tpg,
 						   tl_se_tpg);
 	return tl_tpg->tl_fabric_prot_type;
-}
-
-static struct se_node_acl *tcm_loop_tpg_alloc_fabric_acl(
-	struct se_portal_group *se_tpg)
-{
-	struct tcm_loop_nacl *tl_nacl;
-
-	tl_nacl = kzalloc(sizeof(struct tcm_loop_nacl), GFP_KERNEL);
-	if (!tl_nacl) {
-		pr_err("Unable to allocate struct tcm_loop_nacl\n");
-		return NULL;
-	}
-
-	return &tl_nacl->se_node_acl;
-}
-
-static void tcm_loop_tpg_release_fabric_acl(
-	struct se_portal_group *se_tpg,
-	struct se_node_acl *se_nacl)
-{
-	struct tcm_loop_nacl *tl_nacl = container_of(se_nacl,
-				struct tcm_loop_nacl, se_node_acl);
-
-	kfree(tl_nacl);
 }
 
 static u32 tcm_loop_get_inst_index(struct se_portal_group *se_tpg)
@@ -1410,7 +1381,6 @@ static int tcm_loop_register_configfs(void)
 	fabric->tf_ops.get_fabric_proto_ident = &tcm_loop_get_fabric_proto_ident;
 	fabric->tf_ops.tpg_get_wwn = &tcm_loop_get_endpoint_wwn;
 	fabric->tf_ops.tpg_get_tag = &tcm_loop_get_tag;
-	fabric->tf_ops.tpg_get_default_depth = &tcm_loop_get_default_depth;
 	fabric->tf_ops.tpg_get_pr_transport_id = &tcm_loop_get_pr_transport_id;
 	fabric->tf_ops.tpg_get_pr_transport_id_len =
 					&tcm_loop_get_pr_transport_id_len;
@@ -1425,14 +1395,6 @@ static int tcm_loop_register_configfs(void)
 					&tcm_loop_check_prod_mode_write_protect;
 	fabric->tf_ops.tpg_check_prot_fabric_only =
 					&tcm_loop_check_prot_fabric_only;
-	/*
-	 * The TCM loopback fabric module runs in demo-mode to a local
-	 * virtual SCSI device, so fabric dependent initator ACLs are
-	 * not required.
-	 */
-	fabric->tf_ops.tpg_alloc_fabric_acl = &tcm_loop_tpg_alloc_fabric_acl;
-	fabric->tf_ops.tpg_release_fabric_acl =
-					&tcm_loop_tpg_release_fabric_acl;
 	fabric->tf_ops.tpg_get_inst_index = &tcm_loop_get_inst_index;
 	/*
 	 * Used for setting up remaining TCM resources in process context

@@ -3,6 +3,7 @@
 
 struct target_core_fabric_ops {
 	struct configfs_subsystem *tf_subsys;
+	size_t node_acl_size;
 	char *(*get_fabric_name)(void);
 	u8 (*get_fabric_proto_ident)(struct se_portal_group *);
 	char *(*tpg_get_wwn)(struct se_portal_group *);
@@ -35,10 +36,6 @@ struct target_core_fabric_ops {
 	 * WRITE_STRIP and READ_INSERT operations.
 	 */
 	int (*tpg_check_prot_fabric_only)(struct se_portal_group *);
-	struct se_node_acl *(*tpg_alloc_fabric_acl)(
-					struct se_portal_group *);
-	void (*tpg_release_fabric_acl)(struct se_portal_group *,
-					struct se_node_acl *);
 	u32 (*tpg_get_inst_index)(struct se_portal_group *);
 	/*
 	 * Optional to release struct se_cmd and fabric dependent allocated
@@ -87,8 +84,7 @@ struct target_core_fabric_ops {
 	struct se_tpg_np *(*fabric_make_np)(struct se_portal_group *,
 				struct config_group *, const char *);
 	void (*fabric_drop_np)(struct se_tpg_np *);
-	struct se_node_acl *(*fabric_make_nodeacl)(struct se_portal_group *,
-				struct config_group *, const char *);
+	int (*fabric_init_nodeacl)(struct se_node_acl *, const char *);
 	void (*fabric_drop_nodeacl)(struct se_node_acl *);
 };
 
@@ -155,9 +151,8 @@ struct se_node_acl *core_tpg_check_initiator_node_acl(struct se_portal_group *,
 		unsigned char *);
 void	core_tpg_clear_object_luns(struct se_portal_group *);
 struct se_node_acl *core_tpg_add_initiator_node_acl(struct se_portal_group *,
-		struct se_node_acl *, const char *, u32);
-int	core_tpg_del_initiator_node_acl(struct se_portal_group *,
-		struct se_node_acl *, int);
+		const char *);
+void	core_tpg_del_initiator_node_acl(struct se_node_acl *);
 int	core_tpg_set_initiator_node_queue_depth(struct se_portal_group *,
 		unsigned char *, u32, int);
 int	core_tpg_set_initiator_node_tag(struct se_portal_group *,

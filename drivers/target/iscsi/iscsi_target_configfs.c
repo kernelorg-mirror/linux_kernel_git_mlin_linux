@@ -863,47 +863,12 @@ static struct configfs_attribute *lio_target_initiator_attrs[] = {
 	NULL,
 };
 
-static struct se_node_acl *lio_tpg_alloc_fabric_acl(
-	struct se_portal_group *se_tpg)
+static int lio_target_init_nodeacl(struct se_node_acl *se_nacl, const char *name)
 {
-	struct iscsi_node_acl *acl;
-
-	acl = kzalloc(sizeof(struct iscsi_node_acl), GFP_KERNEL);
-	if (!acl) {
-		pr_err("Unable to allocate memory for struct iscsi_node_acl\n");
-		return NULL;
-	}
-
-	return &acl->se_node_acl;
-}
-
-static struct se_node_acl *lio_target_make_nodeacl(
-	struct se_portal_group *se_tpg,
-	struct config_group *group,
-	const char *name)
-{
+	struct iscsi_node_acl *acl =
+		container_of(se_nacl, struct iscsi_node_acl, se_node_acl);
 	struct config_group *stats_cg;
-	struct iscsi_node_acl *acl;
-	struct se_node_acl *se_nacl_new, *se_nacl;
-	struct iscsi_portal_group *tpg = container_of(se_tpg,
-			struct iscsi_portal_group, tpg_se_tpg);
-	u32 cmdsn_depth;
 
-	se_nacl_new = lio_tpg_alloc_fabric_acl(se_tpg);
-	if (!se_nacl_new)
-		return ERR_PTR(-ENOMEM);
-
-	cmdsn_depth = tpg->tpg_attrib.default_cmdsn_depth;
-	/*
-	 * se_nacl_new may be released by core_tpg_add_initiator_node_acl()
-	 * when converting a NdoeACL from demo mode -> explict
-	 */
-	se_nacl = core_tpg_add_initiator_node_acl(se_tpg, se_nacl_new,
-				name, cmdsn_depth);
-	if (IS_ERR(se_nacl))
-		return se_nacl;
-
-	acl = container_of(se_nacl, struct iscsi_node_acl, se_node_acl);
 	stats_cg = &se_nacl->acl_fabric_stat_group;
 
 	stats_cg->default_groups = kmalloc(sizeof(struct config_group *) * 2,
@@ -911,9 +876,7 @@ static struct se_node_acl *lio_target_make_nodeacl(
 	if (!stats_cg->default_groups) {
 		pr_err("Unable to allocate memory for"
 				" stats_cg->default_groups\n");
-		core_tpg_del_initiator_node_acl(se_tpg, se_nacl, 1);
-		kfree(acl);
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
 
 	stats_cg->default_groups[0] = &acl->node_stat_grps.iscsi_sess_stats_group;
@@ -921,13 +884,12 @@ static struct se_node_acl *lio_target_make_nodeacl(
 	config_group_init_type_name(&acl->node_stat_grps.iscsi_sess_stats_group,
 			"iscsi_sess_stats", &iscsi_stat_sess_cit);
 
-	return se_nacl;
+	return 0;
 }
 
 static void lio_target_drop_nodeacl(
 	struct se_node_acl *se_nacl)
 {
-	struct se_portal_group *se_tpg = se_nacl->se_tpg;
 	struct iscsi_node_acl *acl = container_of(se_nacl,
 			struct iscsi_node_acl, se_node_acl);
 	struct config_item *df_item;
@@ -941,9 +903,6 @@ static void lio_target_drop_nodeacl(
 		config_item_put(df_item);
 	}
 	kfree(stats_cg->default_groups);
-
-	core_tpg_del_initiator_node_acl(se_tpg, se_nacl, 1);
-	kfree(acl);
 }
 
 /* End items for lio_target_acl_cit */
@@ -1902,15 +1861,6 @@ static int lio_tpg_check_prot_fabric_only(
 	return tpg->tpg_attrib.fabric_prot_type;
 }
 
-static void lio_tpg_release_fabric_acl(
-	struct se_portal_group *se_tpg,
-	struct se_node_acl *se_acl)
-{
-	struct iscsi_node_acl *acl = container_of(se_acl,
-				struct iscsi_node_acl, se_node_acl);
-	kfree(acl);
-}
-
 /*
  * Called with spin_lock_bh(struct se_portal_group->session_lock) held..
  *
@@ -2000,6 +1950,7 @@ int iscsi_target_register_configfs(void)
 	/*
 	 * Setup the fabric API of function pointers used by target_core_mod..
 	 */
+	fabric->tf_ops.node_acl_size = sizeof(struct iscsi_node_acl);
 	fabric->tf_ops.get_fabric_name = &iscsi_get_fabric_name;
 	fabric->tf_ops.get_fabric_proto_ident = &iscsi_get_fabric_proto_ident;
 	fabric->tf_ops.tpg_get_wwn = &lio_tpg_get_endpoint_wwn;
@@ -2019,8 +1970,6 @@ int iscsi_target_register_configfs(void)
 				&lio_tpg_check_prod_mode_write_protect;
 	fabric->tf_ops.tpg_check_prot_fabric_only =
 				&lio_tpg_check_prot_fabric_only;
-	fabric->tf_ops.tpg_alloc_fabric_acl = &lio_tpg_alloc_fabric_acl;
-	fabric->tf_ops.tpg_release_fabric_acl = &lio_tpg_release_fabric_acl;
 	fabric->tf_ops.tpg_get_inst_index = &lio_tpg_get_inst_index;
 	fabric->tf_ops.check_stop_free = &lio_check_stop_free,
 	fabric->tf_ops.release_cmd = &lio_release_cmd;
@@ -2049,7 +1998,7 @@ int iscsi_target_register_configfs(void)
 	fabric->tf_ops.fabric_pre_unlink = NULL;
 	fabric->tf_ops.fabric_make_np = &lio_target_call_addnptotpg;
 	fabric->tf_ops.fabric_drop_np = &lio_target_call_delnpfromtpg;
-	fabric->tf_ops.fabric_make_nodeacl = &lio_target_make_nodeacl;
+	fabric->tf_ops.fabric_init_nodeacl = &lio_target_init_nodeacl;
 	fabric->tf_ops.fabric_drop_nodeacl = &lio_target_drop_nodeacl;
 	/*
 	 * Setup default attribute lists for various fabric->tf_cit_tmpl

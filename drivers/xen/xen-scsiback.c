@@ -1289,11 +1289,6 @@ static u16 scsiback_get_tag(struct se_portal_group *se_tpg)
 	return tpg->tport_tpgt;
 }
 
-static u32 scsiback_get_default_depth(struct se_portal_group *se_tpg)
-{
-	return 1;
-}
-
 static u32
 scsiback_get_pr_transport_id(struct se_portal_group *se_tpg,
 			      struct se_node_acl *se_nacl,
@@ -1449,19 +1444,6 @@ static void scsiback_drop_tport(struct se_wwn *wwn)
 		 scsiback_dump_proto_id(tport), tport->tport_name);
 
 	kfree(tport);
-}
-
-static struct se_node_acl *
-scsiback_alloc_fabric_acl(struct se_portal_group *se_tpg)
-{
-	return kzalloc(sizeof(struct se_node_acl), GFP_KERNEL);
-}
-
-static void
-scsiback_release_fabric_acl(struct se_portal_group *se_tpg,
-			     struct se_node_acl *se_nacl)
-{
-	kfree(se_nacl);
 }
 
 static u32 scsiback_tpg_get_inst_index(struct se_portal_group *se_tpg)
@@ -1948,7 +1930,6 @@ static struct target_core_fabric_ops scsiback_ops = {
 	.get_fabric_proto_ident		= scsiback_get_fabric_proto_ident,
 	.tpg_get_wwn			= scsiback_get_fabric_wwn,
 	.tpg_get_tag			= scsiback_get_tag,
-	.tpg_get_default_depth		= scsiback_get_default_depth,
 	.tpg_get_pr_transport_id	= scsiback_get_pr_transport_id,
 	.tpg_get_pr_transport_id_len	= scsiback_get_pr_transport_id_len,
 	.tpg_parse_pr_out_transport_id	= scsiback_parse_pr_out_transport_id,
@@ -1956,8 +1937,6 @@ static struct target_core_fabric_ops scsiback_ops = {
 	.tpg_check_demo_mode_cache	= scsiback_check_true,
 	.tpg_check_demo_mode_write_protect = scsiback_check_false,
 	.tpg_check_prod_mode_write_protect = scsiback_check_false,
-	.tpg_alloc_fabric_acl		= scsiback_alloc_fabric_acl,
-	.tpg_release_fabric_acl		= scsiback_release_fabric_acl,
 	.tpg_get_inst_index		= scsiback_tpg_get_inst_index,
 	.check_stop_free		= scsiback_check_stop_free,
 	.release_cmd			= scsiback_release_cmd,
@@ -1984,12 +1963,6 @@ static struct target_core_fabric_ops scsiback_ops = {
 	.fabric_drop_tpg		= scsiback_drop_tpg,
 	.fabric_post_link		= scsiback_port_link,
 	.fabric_pre_unlink		= scsiback_port_unlink,
-	.fabric_make_np			= NULL,
-	.fabric_drop_np			= NULL,
-#if 0
-	.fabric_make_nodeacl		= scsiback_make_nodeacl,
-	.fabric_drop_nodeacl		= scsiback_drop_nodeacl,
-#endif
 };
 
 static int scsiback_register_configfs(void)
