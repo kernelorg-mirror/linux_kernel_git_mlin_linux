@@ -532,20 +532,7 @@ static u8 tcm_loop_get_fabric_proto_ident(struct se_portal_group *se_tpg)
 	 * Based upon tl_proto_id, TCM_Loop emulates the requested fabric
 	 * ProtocolID using target_core_fabric_lib.c symbols.
 	 */
-	switch (tl_hba->tl_proto_id) {
-	case SCSI_PROTOCOL_SAS:
-		return sas_get_fabric_proto_ident(se_tpg);
-	case SCSI_PROTOCOL_FCP:
-		return fc_get_fabric_proto_ident(se_tpg);
-	case SCSI_PROTOCOL_ISCSI:
-		return iscsi_get_fabric_proto_ident(se_tpg);
-	default:
-		pr_err("Unknown tl_proto_id: 0x%02x, using"
-			" SAS emulation\n", tl_hba->tl_proto_id);
-		break;
-	}
-
-	return sas_get_fabric_proto_ident(se_tpg);
+	return target_get_fabric_proto_ident(tl_hba->tl_proto_id);
 }
 
 static char *tcm_loop_get_endpoint_wwn(struct se_portal_group *se_tpg)
@@ -1215,6 +1202,9 @@ static struct se_portal_group *tcm_loop_make_naa_tpg(
 	if (ret < 0)
 		return ERR_PTR(-ENOMEM);
 
+	tcm_loop_fabric_configfs->tf_ops.scsi_protocol =
+		tcm_loop_get_fabric_proto_ident(&tl_tpg->tl_se_tpg);
+
 	pr_debug("TCM_Loop_ConfigFS: Allocated Emulated %s"
 		" Target Port %s,t,0x%04lx\n", tcm_loop_dump_proto_id(tl_hba),
 		config_item_name(&wwn->wwn_group.cg_item), tpgt);
@@ -1378,7 +1368,6 @@ static int tcm_loop_register_configfs(void)
 	 * Setup the fabric API of function pointers used by target_core_mod
 	 */
 	fabric->tf_ops.get_fabric_name = &tcm_loop_get_fabric_name;
-	fabric->tf_ops.get_fabric_proto_ident = &tcm_loop_get_fabric_proto_ident;
 	fabric->tf_ops.tpg_get_wwn = &tcm_loop_get_endpoint_wwn;
 	fabric->tf_ops.tpg_get_tag = &tcm_loop_get_tag;
 	fabric->tf_ops.tpg_get_pr_transport_id = &tcm_loop_get_pr_transport_id;

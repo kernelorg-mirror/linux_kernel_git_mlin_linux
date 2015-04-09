@@ -4,8 +4,8 @@
 struct target_core_fabric_ops {
 	struct configfs_subsystem *tf_subsys;
 	size_t node_acl_size;
+	u8 scsi_protocol;
 	char *(*get_fabric_name)(void);
-	u8 (*get_fabric_proto_ident)(struct se_portal_group *);
 	char *(*tpg_get_wwn)(struct se_portal_group *);
 	u16 (*tpg_get_tag)(struct se_portal_group *);
 	u32 (*tpg_get_default_depth)(struct se_portal_group *);
@@ -161,8 +161,9 @@ int	core_tpg_register(struct target_core_fabric_ops *, struct se_wwn *,
 		struct se_portal_group *, void *, int);
 int	core_tpg_deregister(struct se_portal_group *);
 
+u8	target_get_fabric_proto_ident(u8);
+
 /* SAS helpers */
-u8	sas_get_fabric_proto_ident(struct se_portal_group *);
 u32	sas_get_pr_transport_id(struct se_portal_group *, struct se_node_acl *,
 		struct t10_pr_registration *, int *, unsigned char *);
 u32	sas_get_pr_transport_id_len(struct se_portal_group *, struct se_node_acl *,
@@ -171,7 +172,6 @@ char	*sas_parse_pr_out_transport_id(struct se_portal_group *, const char *,
 		u32 *, char **);
 
 /* FC helpers */
-u8	fc_get_fabric_proto_ident(struct se_portal_group *);
 u32	fc_get_pr_transport_id(struct se_portal_group *, struct se_node_acl *,
 		struct t10_pr_registration *, int *, unsigned char *);
 u32	fc_get_pr_transport_id_len(struct se_portal_group *, struct se_node_acl *,
@@ -180,7 +180,6 @@ char	*fc_parse_pr_out_transport_id(struct se_portal_group *, const char *,
 		u32 *, char **);
 
 /* iSCSI helpers */
-u8	iscsi_get_fabric_proto_ident(struct se_portal_group *);
 u32	iscsi_get_pr_transport_id(struct se_portal_group *, struct se_node_acl *,
 		struct t10_pr_registration *, int *, unsigned char *);
 u32	iscsi_get_pr_transport_id_len(struct se_portal_group *, struct se_node_acl *,

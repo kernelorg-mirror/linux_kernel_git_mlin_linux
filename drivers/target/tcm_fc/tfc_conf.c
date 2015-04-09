@@ -449,8 +449,8 @@ static u32 ft_tpg_get_inst_index(struct se_portal_group *se_tpg)
 
 static struct target_core_fabric_ops ft_fabric_ops = {
 	.node_acl_size =		sizeof(struct ft_node_acl),
+	.scsi_protocol =		SCSI_PROTOCOL_FCP,
 	.get_fabric_name =		ft_get_fabric_name,
-	.get_fabric_proto_ident =	fc_get_fabric_proto_ident,
 	.tpg_get_wwn =			ft_get_fabric_wwn,
 	.tpg_get_tag =			ft_get_tag,
 	.tpg_get_pr_transport_id =	fc_get_pr_transport_id,

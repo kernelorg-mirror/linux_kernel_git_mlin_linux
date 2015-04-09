@@ -296,20 +296,7 @@ static u8 vhost_scsi_get_fabric_proto_ident(struct se_portal_group *se_tpg)
 				struct vhost_scsi_tpg, se_tpg);
 	struct vhost_scsi_tport *tport = tpg->tport;
 
-	switch (tport->tport_proto_id) {
-	case SCSI_PROTOCOL_SAS:
-		return sas_get_fabric_proto_ident(se_tpg);
-	case SCSI_PROTOCOL_FCP:
-		return fc_get_fabric_proto_ident(se_tpg);
-	case SCSI_PROTOCOL_ISCSI:
-		return iscsi_get_fabric_proto_ident(se_tpg);
-	default:
-		pr_err("Unknown tport_proto_id: 0x%02x, using"
-			" SAS emulation\n", tport->tport_proto_id);
-		break;
-	}
-
-	return sas_get_fabric_proto_ident(se_tpg);
+	return target_get_fabric_proto_ident(tport->tport_proto_id);
 }
 
 static char *vhost_scsi_get_fabric_wwn(struct se_portal_group *se_tpg)
@@ -2130,6 +2117,8 @@ vhost_scsi_make_tpg(struct se_wwn *wwn,
 		kfree(tpg);
 		return NULL;
 	}
+	vhost_scsi_fabric_configfs->tf_ops.scsi_protocol =
+		vhost_scsi_get_fabric_proto_ident(&tpg->se_tpg);
 	mutex_lock(&vhost_scsi_mutex);
 	list_add_tail(&tpg->tv_tpg_list, &vhost_scsi_list);
 	mutex_unlock(&vhost_scsi_mutex);
@@ -2247,7 +2236,6 @@ static struct configfs_attribute *vhost_scsi_wwn_attrs[] = {
 
 static struct target_core_fabric_ops vhost_scsi_ops = {
 	.get_fabric_name		= vhost_scsi_get_fabric_name,
-	.get_fabric_proto_ident		= vhost_scsi_get_fabric_proto_ident,
 	.tpg_get_wwn			= vhost_scsi_get_fabric_wwn,
 	.tpg_get_tag			= vhost_scsi_get_tpgt,
 	.tpg_get_pr_transport_id	= vhost_scsi_get_pr_transport_id,

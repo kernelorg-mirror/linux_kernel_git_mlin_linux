@@ -1257,20 +1257,7 @@ static u8 scsiback_get_fabric_proto_ident(struct se_portal_group *se_tpg)
 				struct scsiback_tpg, se_tpg);
 	struct scsiback_tport *tport = tpg->tport;
 
-	switch (tport->tport_proto_id) {
-	case SCSI_PROTOCOL_SAS:
-		return sas_get_fabric_proto_ident(se_tpg);
-	case SCSI_PROTOCOL_FCP:
-		return fc_get_fabric_proto_ident(se_tpg);
-	case SCSI_PROTOCOL_ISCSI:
-		return iscsi_get_fabric_proto_ident(se_tpg);
-	default:
-		pr_err("Unknown tport_proto_id: 0x%02x, using SAS emulation\n",
-			tport->tport_proto_id);
-		break;
-	}
-
-	return sas_get_fabric_proto_ident(se_tpg);
+	return target_get_fabric_proto_ident(tport->tport_proto_id);
 }
 
 static char *scsiback_get_fabric_wwn(struct se_portal_group *se_tpg)
@@ -1889,6 +1876,8 @@ scsiback_make_tpg(struct se_wwn *wwn,
 		kfree(tpg);
 		return NULL;
 	}
+	scsiback_fabric_configfs->tf_ops.scsi_protocol =
+		scsiback_get_fabric_proto_ident(&tpg->se_tpg);
 	mutex_lock(&scsiback_mutex);
 	list_add_tail(&tpg->tv_tpg_list, &scsiback_list);
 	mutex_unlock(&scsiback_mutex);
@@ -1927,7 +1916,6 @@ static int scsiback_check_false(struct se_portal_group *se_tpg)
 
 static struct target_core_fabric_ops scsiback_ops = {
 	.get_fabric_name		= scsiback_get_fabric_name,
-	.get_fabric_proto_ident		= scsiback_get_fabric_proto_ident,
 	.tpg_get_wwn			= scsiback_get_fabric_wwn,
 	.tpg_get_tag			= scsiback_get_tag,
 	.tpg_get_pr_transport_id	= scsiback_get_pr_transport_id,
