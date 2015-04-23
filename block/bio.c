@@ -1139,6 +1139,33 @@ int bio_uncopy_user(struct bio *bio)
 }
 EXPORT_SYMBOL(bio_uncopy_user);
 
+static int iov_count_pages(const struct iov_iter *iter, unsigned align)
+{
+	struct iov_iter i = *iter;
+	int nr_pages = 0;
+
+	while (iov_iter_count(&i)) {
+		unsigned long uaddr = (unsigned long) i.iov->iov_base +
+			i.iov_offset;
+		unsigned long len = i.iov->iov_len - i.iov_offset;
+
+		if ((uaddr & align) || (len & align))
+			return -EINVAL;
+
+		/*
+		 * Overflow, abort
+		 */
+		if (uaddr + len < uaddr)
+			return -EINVAL;
+
+		nr_pages += DIV_ROUND_UP(len + offset_in_page(uaddr),
+					 PAGE_SIZE);
+		iov_iter_advance(&i, len);
+	}
+
+	return nr_pages;
+}
+
 /**
  *	bio_copy_user_iov	-	copy user data to bio
  *	@q:		destination block queue
@@ -1158,29 +1185,14 @@ struct bio *bio_copy_user_iov(struct request_queue *q,
 	struct bio_map_data *bmd;
 	struct page *page;
 	struct bio *bio;
-	int i, ret;
+	int uninitialized_var(i), ret;
 	int nr_pages = 0;
 	unsigned int len = iter->count;
 	unsigned int offset = map_data ? map_data->offset & ~PAGE_MASK : 0;
 
-	for (i = 0; i < iter->nr_segs; i++) {
-		unsigned long uaddr;
-		unsigned long end;
-		unsigned long start;
-
-		uaddr = (unsigned long) iter->iov[i].iov_base;
-		end = (uaddr + iter->iov[i].iov_len + PAGE_SIZE - 1)
-			>> PAGE_SHIFT;
-		start = uaddr >> PAGE_SHIFT;
-
-		/*
-		 * Overflow, abort
-		 */
-		if (end < start)
-			return ERR_PTR(-EINVAL);
-
-		nr_pages += end - start;
-	}
+	nr_pages = iov_count_pages(iter, 0);
+	if (nr_pages < 0)
+		return ERR_PTR(nr_pages);
 
 	if (offset)
 		nr_pages++;
@@ -1292,25 +1304,9 @@ struct bio *bio_map_user_iov(struct request_queue *q,
 	struct iov_iter i;
 	struct iovec iov;
 
-	iov_for_each(iov, i, *iter) {
-		unsigned long uaddr = (unsigned long) iov.iov_base;
-		unsigned long len = iov.iov_len;
-		unsigned long end = (uaddr + len + PAGE_SIZE - 1) >> PAGE_SHIFT;
-		unsigned long start = uaddr >> PAGE_SHIFT;
-
-		/*
-		 * Overflow, abort
-		 */
-		if (end < start)
-			return ERR_PTR(-EINVAL);
-
-		nr_pages += end - start;
-		/*
-		 * buffer must be aligned to at least hardsector size for now
-		 */
-		if (uaddr & queue_dma_alignment(q))
-			return ERR_PTR(-EINVAL);
-	}
+	nr_pages = iov_count_pages(iter, queue_dma_alignment(q));
+	if (nr_pages < 0)
+		return ERR_PTR(nr_pages);
 
 	if (!nr_pages)
 		return ERR_PTR(-EINVAL);
