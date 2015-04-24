@@ -1256,6 +1256,8 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
 		return;
 	}
 
+	blk_queue_split(q, &bio, q->bio_split);
+
 	rq = blk_mq_map_request(q, bio, &data);
 	if (unlikely(!rq))
 		return;
@@ -1338,6 +1340,8 @@ static void blk_sq_make_request(struct request_queue *q, struct bio *bio)
 		bio_endio(bio, -EIO);
 		return;
 	}
+
+	blk_queue_split(q, &bio, q->bio_split);
 
 	if (use_plug && !blk_queue_nomerges(q) &&
 	    blk_attempt_plug_merge(q, bio, &request_count))
