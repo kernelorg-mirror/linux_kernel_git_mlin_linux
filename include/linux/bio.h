@@ -428,6 +428,7 @@ extern int bio_add_page(struct bio *, struct page *, unsigned int,unsigned int);
 extern int bio_add_pc_page(struct request_queue *, struct bio *, struct page *,
 			   unsigned int, unsigned int);
 struct rq_map_data;
+extern ssize_t bio_get_user_pages(struct bio *, struct iov_iter *, int);
 extern struct bio *bio_map_user_iov(struct request_queue *,
 				    const struct iov_iter *, gfp_t);
 extern void bio_unmap_user(struct bio *);
