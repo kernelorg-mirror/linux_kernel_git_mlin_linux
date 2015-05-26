@@ -69,24 +69,13 @@ static struct bio *blk_bio_segment_split(struct request_queue *q,
 	struct bio *split;
 	struct bio_vec bv, bvprv;
 	struct bvec_iter iter;
-	unsigned seg_size = 0, nsegs = 0;
+	unsigned seg_size = 0, nsegs = 0, sectors = 0;
 	int prev = 0;
 
-	struct bvec_merge_data bvm = {
-		.bi_bdev	= bio->bi_bdev,
-		.bi_sector	= bio->bi_iter.bi_sector,
-		.bi_size	= 0,
-		.bi_rw		= bio->bi_rw,
-	};
-
 	bio_for_each_segment(bv, bio, iter) {
-		if (q->merge_bvec_fn &&
-		    q->merge_bvec_fn(q, &bvm, &bv) < (int) bv.bv_len)
-			goto split;
+		sectors += bv.bv_len >> 9;
 
-		bvm.bi_size += bv.bv_len;
-
-		if (bvm.bi_size >> 9 > queue_max_sectors(q))
+		if (sectors > queue_max_sectors(q))
 			goto split;
 
 		/*
@@ -160,7 +149,7 @@ static unsigned int __blk_recalc_rq_segments(struct request_queue *q,
 					     bool no_sg_merge)
 {
 	struct bio_vec bv, bvprv = { NULL };
-	int cluster, high, highprv = 1;
+	int cluster, prev = 0;
 	unsigned int seg_size, nr_phys_segs;
 	struct bio *fbio, *bbio;
 	struct bvec_iter iter;
@@ -182,7 +171,6 @@ static unsigned int __blk_recalc_rq_segments(struct request_queue *q,
 	cluster = blk_queue_cluster(q);
 	seg_size = 0;
 	nr_phys_segs = 0;
-	high = 0;
 	for_each_bio(bio) {
 		bio_for_each_segment(bv, bio, iter) {
 			/*
@@ -192,13 +180,7 @@ static unsigned int __blk_recalc_rq_segments(struct request_queue *q,
 			if (no_sg_merge)
 				goto new_segment;
 
-			/*
-			 * the trick here is making sure that a high page is
-			 * never considered part of another segment, since
-			 * that might change with the bounce page.
-			 */
-			high = page_to_pfn(bv.bv_page) > queue_bounce_pfn(q);
-			if (!high && !highprv && cluster) {
+			if (prev && cluster) {
 				if (seg_size + bv.bv_len
 				    > queue_max_segment_size(q))
 					goto new_segment;
@@ -218,8 +200,8 @@ new_segment:
 
 			nr_phys_segs++;
 			bvprv = bv;
+			prev = 1;
 			seg_size = bv.bv_len;
-			highprv = high;
 		}
 		bbio = bio;
 	}
