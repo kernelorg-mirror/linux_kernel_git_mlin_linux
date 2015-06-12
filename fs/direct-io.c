@@ -49,6 +49,7 @@ struct dio {
 	/* BIO completion state */
 	int		page_error;	/* errno from get_user_pages() */
 	int		io_error;	/* IO error in completion path */
+	int		is_async;	/* is IO async ? */
 	bool defer_completion;		/* defer AIO completion to workqueue? */
 	atomic_t	refcount;	/* direct_io_worker() and bios */
 
@@ -560,6 +561,7 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 {
 	unsigned nr_pages = 0, i_blkbits;
 	size_t size = iov_iter_count(iter);
+	loff_t end = offset + size;
 	ssize_t retval = 0;
 	struct dio *dio;
 	struct blk_plug plug;
@@ -574,7 +576,7 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 	if (rw == READ && !size)
 		return 0;
 
-	nr_pages = iov_iter_npages(iter, 511);
+	nr_pages = iov_iter_npages(iter, INT_MAX);
 	if (nr_pages < 0)
 		return nr_pages;
 
@@ -587,7 +589,7 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 			mutex_lock(&inode->i_mutex);
 
 			retval = filemap_write_and_wait_range(mapping, offset,
-							   offset + size - 1);
+							   end - 1);
 			if (retval) {
 				mutex_unlock(&inode->i_mutex);
 				return retval;
@@ -620,6 +622,38 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 	dio->iocb	= iocb;
 	dio->result	= 0;
 	dio->defer_completion = false;
+
+	/*
+	 * For file extending writes updating i_size before data writeouts
+	 * complete can expose uninitialized blocks in dumb filesystems.
+	 * In that case we need to wait for I/O completion even if asked
+	 * for an asynchronous write.
+	 */
+	if (is_sync_kiocb(iocb))
+		dio->is_async = false;
+	else if (!(dio->flags & DIO_ASYNC_EXTEND) &&
+		 iov_iter_rw(iter) == WRITE && end > i_size_read(inode))
+		dio->is_async = false;
+	else
+		dio->is_async = true;
+
+	/*
+	 * For AIO O_(D)SYNC writes we need to defer completions to a workqueue
+	 * so that we can call ->fsync.
+	 */
+	if (dio->is_async && iov_iter_rw(iter) == WRITE &&
+	    ((iocb->ki_filp->f_flags & O_DSYNC) ||
+	     IS_SYNC(iocb->ki_filp->f_mapping->host))) {
+		retval = dio_set_defer_completion(dio);
+		if (retval) {
+			/*
+			 * We grab i_mutex only for reads so we don't have
+			 * to release it here
+			 */
+			bio_put(&dio->bio);
+			return retval;
+		}
+	}
 
 	blk_start_plug(&plug);
 
