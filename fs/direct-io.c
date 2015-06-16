@@ -305,7 +305,7 @@ static int get_blocks(struct dio *dio, loff_t offset, size_t size,
 	else
 		map->state = MAP_MAPPED;
 
-#if 0
+#if 1
 	/* Previous DIO code only handled holes one block at a time */
 	if (map->state == MAP_UNMAPPED)
 		map_bh.b_size = 1 << dio->i_blkbits;
