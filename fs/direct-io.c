@@ -369,6 +369,8 @@ static void dio_write_zeroes(struct dio *dio, struct bio *parent,
 	unsigned pages = DIV_ROUND_UP(size, PAGE_SIZE);
 	struct bio *bio = bio_alloc(GFP_KERNEL, pages);
 
+	bio->bi_vcnt = pages;
+
 	while (pages--) {
 		bio->bi_io_vec[pages].bv_page = ZERO_PAGE(0);
 		bio->bi_io_vec[pages].bv_len = PAGE_SIZE;
