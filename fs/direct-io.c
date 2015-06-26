@@ -46,6 +46,8 @@ struct dio {
 	loff_t		i_size;		/* i_size when submitted */
 	unsigned	i_blkbits;
 
+	unsigned	start_zero_done;
+
 	/* BIO completion state */
 	int		page_error;	/* errno from get_user_pages() */
 	int		io_error;	/* IO error in completion path */
@@ -386,19 +388,24 @@ static void dio_write_zeroes(struct dio *dio, struct bio *parent,
 }
 
 static void dio_zero_partial_block(struct dio *dio, struct bio *bio,
-				   struct dio_mapping *map, loff_t offset)
+				   struct dio_mapping *map, loff_t offset, int end)
 {
 	unsigned blksize = 1 << dio->i_blkbits;
 	unsigned blkmask = blksize - 1;
 	unsigned front = offset & blkmask;
 	unsigned back = (offset + map->size) & blkmask;
 
-	if (front)
+	dio->start_zero_done = 1;
+
+	if ((map->state|dio->rw) != (MAP_NEW|WRITE))
+		return;
+
+	if (!end && front)
 		dio_write_zeroes(dio, bio, map->bdev,
 				 (map->offset - front) >> 9,
 				 front);
 
-	if (back)
+	if (end && back)
 		dio_write_zeroes(dio, bio, map->bdev,
 				 (map->offset + map->size) >> 9,
 				 blksize - back);
@@ -432,9 +439,9 @@ static int dio_is_aligned(struct dio *dio, struct dio_mapping *map)
 }
 
 static int dio_send_bio(struct dio *dio, struct bio *bio, loff_t offset,
-			get_block_t *get_block, dio_submit_t *submit_io)
+			get_block_t *get_block, dio_submit_t *submit_io,
+			struct dio_mapping *map)
 {
-	struct dio_mapping map;
 	int ret = 0, rw = dio->rw & WRITE;
 
 	if (rw == READ)
@@ -445,36 +452,37 @@ static int dio_send_bio(struct dio *dio, struct bio *bio, loff_t offset,
 			break;
 
 		ret = get_blocks(dio, offset, bio->bi_iter.bi_size,
-				 &map, get_block);
+				 map, get_block);
 		if (ret)
 			break;
 
-		switch (map.state|rw) {
+		switch (map->state|rw) {
 		case MAP_MAPPED|READ:
 		case MAP_MAPPED|WRITE:
-			if (!dio_is_aligned(dio, &map)) {
+			if (!dio_is_aligned(dio, map)) {
 				ret = -EINVAL;
 				goto out;
 			}
 
-			if (dio_bio_submit(dio, bio, &map, offset, submit_io))
+			if (dio_bio_submit(dio, bio, map, offset, submit_io))
 				goto out;
 			break;
 		case MAP_NEW|READ:
 		case MAP_UNMAPPED|READ:
-			if (dio_read_zeroes(dio, bio, &map))
+			if (dio_read_zeroes(dio, bio, map))
 				goto out;
 
 			break;
 		case MAP_NEW|WRITE:
-			if (!dio_is_aligned(dio, &map)) {
+			if (!dio_is_aligned(dio, map)) {
 				ret = -EINVAL;
 				goto out;
 			}
 
-			dio_zero_partial_block(dio, bio, &map, offset);
+			if (!dio->start_zero_done)
+				dio_zero_partial_block(dio, bio, map, offset, 0);
 
-			if (dio_bio_submit(dio, bio, &map, offset, submit_io))
+			if (dio_bio_submit(dio, bio, map, offset, submit_io))
 				goto out;
 			break;
 		case MAP_UNMAPPED|WRITE:
@@ -483,10 +491,10 @@ static int dio_send_bio(struct dio *dio, struct bio *bio, loff_t offset,
 			goto out;
 		}
 
-		if (rw == READ && offset + map.size > dio->i_size)
+		if (rw == READ && offset + map->size > dio->i_size)
 			goto out;
 
-		offset += map.size;
+		offset += map->size;
 	}
 out:
 	bio_endio(bio, 0);
@@ -498,6 +506,7 @@ static int dio_alloc_bios(struct dio *dio, loff_t offset,
 			  get_block_t *get_block, dio_submit_t *submit_io)
 {
 	ssize_t ret;
+	struct dio_mapping map;
 	struct bio *bio;
 
 	bio = &dio->bio;
@@ -524,13 +533,15 @@ start:
 
 		atomic_inc(&dio->refcount);
 		ret = dio_send_bio(dio, bio, offset + dio->result,
-				   get_block, submit_io);
+				   get_block, submit_io, &map);
 		if (ret)
 			return ret;
 
 		if (dio->rw == READ && offset + dio->result == dio->i_size)
 			break;
 	}
+
+	dio_zero_partial_block(dio, bio, &map, offset + dio->result, 1);
 
 	return 0;
 }
@@ -624,6 +635,7 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 	dio->iocb	= iocb;
 	dio->result	= 0;
 	dio->defer_completion = false;
+	dio->start_zero_done = 0;
 
 	/*
 	 * For file extending writes updating i_size before data writeouts
