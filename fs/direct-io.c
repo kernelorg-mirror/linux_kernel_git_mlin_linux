@@ -258,9 +258,9 @@ static int dio_set_defer_completion(struct dio *dio)
 }
 
 static int get_blocks(struct dio *dio, loff_t offset, size_t size,
-		      struct dio_mapping *map, get_block_t *get_block)
+		      struct buffer_head *map_bh, struct dio_mapping *map,
+		      get_block_t *get_block)
 {
-	struct buffer_head map_bh = { 0, };
 	int ret, create;
 	unsigned i_mask = (1 << dio->i_blkbits) - 1;
 	unsigned fs_offset = offset & i_mask;
@@ -284,25 +284,26 @@ static int get_blocks(struct dio *dio, loff_t offset, size_t size,
 	}
 
 	/* fs expects units of fs_blocks */
-	map_bh.b_size = size + fs_offset;
-	map_bh.b_size = round_up(map_bh.b_size, 1 << dio->i_blkbits);
+	map_bh->b_state = 0;
+	map_bh->b_size = size + fs_offset;
+	map_bh->b_size = round_up(map_bh->b_size, 1 << dio->i_blkbits);
 
-	ret = get_block(dio->inode, fs_blocknr, &map_bh, create);
+	ret = get_block(dio->inode, fs_blocknr, map_bh, create);
 	if (ret)
 		return ret;
 
 	/* Store for completion */
-	dio->private = map_bh.b_private;
+	dio->private = map_bh->b_private;
 
-	if (ret == 0 && buffer_defer_completion(&map_bh))
+	if (ret == 0 && buffer_defer_completion(map_bh))
 		ret = dio_set_defer_completion(dio);
 
-	if (buffer_new(&map_bh))
-		clean_blockdev_aliases(dio, &map_bh);
+	if (buffer_new(map_bh))
+		clean_blockdev_aliases(dio, map_bh);
 
-	if (!buffer_mapped(&map_bh))
+	if (!buffer_mapped(map_bh))
 		map->state = MAP_UNMAPPED;
-	else if (buffer_new(&map_bh))
+	else if (buffer_new(map_bh))
 		map->state = MAP_NEW;
 	else
 		map->state = MAP_MAPPED;
@@ -310,15 +311,15 @@ static int get_blocks(struct dio *dio, loff_t offset, size_t size,
 #if 1
 	/* Previous DIO code only handled holes one block at a time */
 	if (map->state == MAP_UNMAPPED)
-		map_bh.b_size = 1 << dio->i_blkbits;
+		map_bh->b_size = 1 << dio->i_blkbits;
 
 #endif
-	BUG_ON(map_bh.b_size <= fs_offset);
+	BUG_ON(map_bh->b_size <= fs_offset);
 
-	map->bdev = map_bh.b_bdev;
-	map->offset = (map_bh.b_blocknr << dio->i_blkbits) +
+	map->bdev = map_bh->b_bdev;
+	map->offset = (map_bh->b_blocknr << dio->i_blkbits) +
 		fs_offset;
-	map->size = min(map_bh.b_size - fs_offset, size);
+	map->size = min(map_bh->b_size - fs_offset, size);
 
 	return ret;
 }
@@ -440,7 +441,7 @@ static int dio_is_aligned(struct dio *dio, struct dio_mapping *map)
 
 static int dio_send_bio(struct dio *dio, struct bio *bio, loff_t offset,
 			get_block_t *get_block, dio_submit_t *submit_io,
-			struct dio_mapping *map)
+			struct buffer_head *map_bh, struct dio_mapping *map)
 {
 	int ret = 0, rw = dio->rw & WRITE;
 
@@ -452,7 +453,7 @@ static int dio_send_bio(struct dio *dio, struct bio *bio, loff_t offset,
 			break;
 
 		ret = get_blocks(dio, offset, bio->bi_iter.bi_size,
-				 map, get_block);
+				 map_bh, map, get_block);
 		if (ret)
 			break;
 
@@ -506,6 +507,7 @@ static int dio_alloc_bios(struct dio *dio, loff_t offset,
 			  get_block_t *get_block, dio_submit_t *submit_io)
 {
 	ssize_t ret;
+	struct buffer_head map_bh = { 0, };
 	struct dio_mapping map;
 	struct bio *bio;
 
@@ -533,7 +535,7 @@ start:
 
 		atomic_inc(&dio->refcount);
 		ret = dio_send_bio(dio, bio, offset + dio->result,
-				   get_block, submit_io, &map);
+				   get_block, submit_io, &map_bh, &map);
 		if (ret)
 			return ret;
 
