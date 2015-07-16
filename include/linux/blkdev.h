@@ -275,6 +275,13 @@ struct queue_limits {
 	unsigned char		raid_partial_stripes_expensive;
 };
 
+enum {
+	DISCARD_SPLIT,
+	WRITE_SAME_SPLIT,
+	SEGMENT_SPLIT,
+	SPLIT_NUM,
+};
+
 struct request_queue {
 	/*
 	 * Together with queue_head for cacheline sharing
@@ -454,6 +461,8 @@ struct request_queue {
 	struct blk_mq_tag_set	*tag_set;
 	struct list_head	tag_set_list;
 	struct bio_set		*bio_split;
+
+	unsigned long		split_stat[SPLIT_NUM];
 };
 
 #define QUEUE_FLAG_QUEUED	1	/* uses generic tag queueing */

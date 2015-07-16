@@ -128,18 +128,24 @@ void blk_queue_split(struct request_queue *q, struct bio **bio,
 		     struct bio_set *bs)
 {
 	struct bio *split;
+	int i;
 
-	if ((*bio)->bi_rw & REQ_DISCARD)
+	if ((*bio)->bi_rw & REQ_DISCARD) {
 		split = blk_bio_discard_split(q, *bio, bs);
-	else if ((*bio)->bi_rw & REQ_WRITE_SAME)
+		i = DISCARD_SPLIT;
+	} else if ((*bio)->bi_rw & REQ_WRITE_SAME) {
 		split = blk_bio_write_same_split(q, *bio, bs);
-	else
+		i = WRITE_SAME_SPLIT;
+	} else {
 		split = blk_bio_segment_split(q, *bio, q->bio_split);
+		i = SEGMENT_SPLIT;
+	}
 
 	if (split) {
 		bio_chain(split, *bio);
 		generic_make_request(*bio);
 		*bio = split;
+		q->split_stat[i]++;
 	}
 }
 EXPORT_SYMBOL(blk_queue_split);

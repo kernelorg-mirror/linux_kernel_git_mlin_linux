@@ -191,6 +191,25 @@ static ssize_t queue_max_hw_sectors_show(struct request_queue *q, char *page)
 	return queue_var_show(max_hw_sectors_kb, (page));
 }
 
+static ssize_t queue_split_show(struct request_queue *q, char *page)
+{
+	return sprintf(page, "discard split: %lu, write same split: %lu, segment split: %lu\n",
+		q->split_stat[DISCARD_SPLIT],
+		q->split_stat[WRITE_SAME_SPLIT],
+		q->split_stat[SEGMENT_SPLIT]);
+}
+
+static ssize_t
+queue_split_store(struct request_queue *q, const char *page, size_t count)
+{
+	int i;
+
+	for (i = 0; i < SPLIT_NUM; i++)
+		q->split_stat[i] = 0;
+
+	return count;
+}
+
 #define QUEUE_SYSFS_BIT_FNS(name, flag, neg)				\
 static ssize_t								\
 queue_show_##name(struct request_queue *q, char *page)			\
@@ -405,6 +424,12 @@ static struct queue_sysfs_entry queue_random_entry = {
 	.store = queue_store_random,
 };
 
+static struct queue_sysfs_entry queue_split_entry = {
+	.attr = {.name = "split", .mode = S_IRUGO | S_IWUSR },
+	.show = queue_split_show,
+	.store = queue_split_store,
+};
+
 static struct attribute *default_attrs[] = {
 	&queue_requests_entry.attr,
 	&queue_ra_entry.attr,
@@ -428,6 +453,7 @@ static struct attribute *default_attrs[] = {
 	&queue_rq_affinity_entry.attr,
 	&queue_iostats_entry.attr,
 	&queue_random_entry.attr,
+	&queue_split_entry.attr,
 	NULL,
 };
 
