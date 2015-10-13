@@ -163,7 +163,4 @@ int nvme_sg_io(struct nvme_ns *ns, struct sg_io_hdr __user *u_hdr);
 int nvme_sg_io32(struct nvme_ns *ns, unsigned long arg);
 int nvme_sg_get_version_num(int __user *ip);
 
-int __init nvme_core_init(void);
-void __exit nvme_core_exit(void);
-
 #endif /* _NVME_H */

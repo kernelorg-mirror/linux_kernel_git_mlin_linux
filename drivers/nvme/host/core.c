@@ -979,7 +979,7 @@ out:
 	return ret;
 }
 
-int __init nvme_core_init(void)
+static int __init nvme_core_init(void)
 {
 	int result;
 
@@ -1011,9 +1011,12 @@ int __init nvme_core_init(void)
 	return result;
 }
 
-void __exit nvme_core_exit(void)
+static void __exit nvme_core_exit(void)
 {
 	unregister_blkdev(nvme_major, "nvme");
 	class_destroy(nvme_class);
 	__unregister_chrdev(nvme_char_major, 0, NVME_MINORS, "nvme");
 }
+
+module_init(nvme_core_init);
+module_exit(nvme_core_exit);
