@@ -8,3 +8,10 @@ config BLK_DEV_NVME
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called nvme.
+
+config VIRTIO_NVME
+	tristate "Virtio NVMe driver"
+	depends on VIRTIO
+	---help---
+	  This is the virtual NVMe driver for virtio.  It can be used with
+          lguest or QEMU based VMMs (like KVM or Xen).  Say Y or M.
