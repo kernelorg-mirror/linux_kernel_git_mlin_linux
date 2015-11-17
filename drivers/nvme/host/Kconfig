@@ -8,3 +8,10 @@ config BLK_DEV_NVME
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called nvme.
+
+config NVME_VENDOR_EXT_GOOGLE
+	tristate "NVMe Vendor Extension for Improved Virtualization"
+	depends on BLK_DEV_NVME
+	---help---
+	  Google extension to reduce the number of MMIO doorbell
+	  writes for the NVMe driver
