@@ -78,6 +78,19 @@ struct nvmet_vhost_cq {
 	spinlock_t		lock;
 	struct task_struct	*thread;
 	int			scheduled;
+
+	/*
+	 * Mapped memory location where the tail pointer is stored by the guest
+	 * without triggering MMIO exits.
+	 */
+	u64			db_addr;
+
+	/*
+	 * virtio-like eventidx pointer, guest updates to the tail pointer that
+	 * do not go over this value will not result in MMIO writes (but will
+	 * still write the tail pointer to the "db_addr" location above).
+	 */
+	u64			eventidx_addr;
 };
 
 struct nvmet_vhost_sq {
@@ -95,6 +108,10 @@ struct nvmet_vhost_sq {
 	struct mutex            lock;
 	struct task_struct	*thread;
 	int			scheduled;
+
+	/* ditto */
+	u64			db_addr;
+	u64			eventidx_addr;
 };
 
 struct nvmet_vhost_ctrl {
@@ -264,6 +281,13 @@ static uint8_t nvmet_vhost_sq_empty(struct nvmet_vhost_sq *sq)
 	return sq->head == sq->tail;
 }
 
+static void nvmet_vhost_update_cq_head(struct nvmet_vhost_cq *cq)
+{
+	if (cq->db_addr)
+		nvmet_vhost_read(&cq->ctrl->dev, cq->db_addr,
+			&cq->head, sizeof(cq->head));
+}
+
 static void nvmet_vhost_post_cqes(struct nvmet_vhost_cq *cq)
 {
 	struct nvmet_vhost_ctrl *n = cq->ctrl;
@@ -276,6 +300,10 @@ static void nvmet_vhost_post_cqes(struct nvmet_vhost_cq *cq)
 	list_for_each_safe(p, tmp, &cq->req_list) {
 		struct nvmet_vhost_sq *sq;
 		u64 addr;
+
+		spin_unlock_irqrestore(&cq->lock, flags);
+		nvmet_vhost_update_cq_head(cq);
+		spin_lock_irqsave(&cq->lock, flags);
 
 		if (nvmet_vhost_cq_full(cq))
 			goto unlock;
@@ -450,6 +478,20 @@ error:
 	return -1;
 }
 
+static void nvmet_vhost_update_sq_eventidx(struct nvmet_vhost_sq *sq)
+{
+	if (sq->eventidx_addr)
+		nvmet_vhost_write(&sq->ctrl->dev, sq->eventidx_addr,
+			&sq->tail, sizeof(sq->tail));
+}
+
+static void nvmet_vhost_update_sq_tail(struct nvmet_vhost_sq *sq)
+{
+	if (sq->db_addr)
+		nvmet_vhost_read(&sq->ctrl->dev, sq->db_addr,
+                     &sq->tail, sizeof(sq->tail));
+}
+
 static void nvmet_vhost_process_sq(struct nvmet_vhost_sq *sq)
 {
 	struct nvmet_vhost_ctrl *n = sq->ctrl;
@@ -460,6 +502,7 @@ static void nvmet_vhost_process_sq(struct nvmet_vhost_sq *sq)
 
 	mutex_lock(&sq->lock);
 
+	nvmet_vhost_update_sq_tail(sq);
 	while (!(nvmet_vhost_sq_empty(sq) || list_empty(&sq->req_list))) {
 		u64 addr = sq->dma_addr + sq->head * n->sqe_size;;
 
@@ -500,6 +543,8 @@ static void nvmet_vhost_process_sq(struct nvmet_vhost_sq *sq)
 
 unlock:
 	sq->scheduled = 0;
+	nvmet_vhost_update_sq_eventidx(sq);
+	nvmet_vhost_update_sq_tail(sq);
 	mutex_unlock(&sq->lock);
 	return;
 
@@ -536,6 +581,8 @@ static int nvmet_vhost_init_cq(struct nvmet_vhost_cq *cq,
 	cq->dma_addr = dma_addr;
 	cq->phase = 1;
 	cq->head = cq->tail = 0;
+	cq->db_addr = 0;
+	cq->eventidx_addr = 0;
 	cq->eventfd = eventfd;
 	n->cqs[cqid] = cq;
 
@@ -562,6 +609,8 @@ static int nvmet_vhost_init_sq(struct nvmet_vhost_sq *sq,
 	sq->dma_addr = dma_addr;
 	sq->cqid = cqid;
 	sq->head = sq->tail = 0;
+	sq->db_addr = 0;
+	sq->eventidx_addr = 0;
 	n->sqs[sqid] = sq;
 
 	mutex_init(&sq->lock);
@@ -730,6 +779,58 @@ out:
 	nvmet_req_complete(req, status);
 }
 
+static void nvmet_vhost_set_db_memory(struct nvmet_req *req)
+{
+	struct nvme_doorbell_memory *c;
+	struct nvmet_sq *sq;
+	struct nvmet_vhost_sq *vsq;
+	struct nvmet_vhost_ctrl *n;
+	u64 db_addr;
+	u64 eventidx_addr;
+	int i;
+	int status = NVME_SC_SUCCESS;
+
+	c = &req->cmd->doorbell_memory;
+	sq = req->sq;
+	vsq = sq_to_vsq(sq);
+	n = vsq->ctrl;
+
+	db_addr = le64_to_cpu(c->prp1);
+	eventidx_addr = le64_to_cpu(c->prp2);
+
+	/* Addresses should not be NULL and should be page aligned. */
+	if (db_addr == 0 || db_addr & (n->page_size - 1) ||
+		eventidx_addr == 0 || eventidx_addr & (n->page_size - 1)) {
+
+		status = NVME_SC_DOORBELL_MEMORY_INVALID | NVME_SC_DNR;
+		goto out;
+	}
+
+	/*
+	 * This assumes all I/O queues are created before this command is handled.
+	 * We skip the admin queues.
+	 */
+	for (i = 1; i < n->num_queues; i++) {
+		struct nvmet_vhost_sq *sq = n->sqs[i];
+		struct nvmet_vhost_cq *cq = n->cqs[i];
+
+		/* Submission queue tail pointer location, 2 * QID * stride. */
+		if (sq) {
+			sq->db_addr = db_addr + 2 * i * 4;
+			sq->eventidx_addr = eventidx_addr + 2 * i * 4;
+		}
+
+		/* Completion queue head pointer location, (2 * QID + 1) * stride.*/
+		if (cq) {
+			cq->db_addr = db_addr + (2 * i + 1) * 4;
+			cq->eventidx_addr = eventidx_addr + (2 * i + 1) * 4;
+		}
+	}
+
+out:
+	nvmet_req_complete(req, status);
+}
+
 static int nvmet_vhost_parse_admin_cmd(struct nvmet_req *req)
 {
 	struct nvme_command *cmd = req->cmd;
@@ -741,6 +842,10 @@ static int nvmet_vhost_parse_admin_cmd(struct nvmet_req *req)
 		return 0;
 	case nvme_admin_create_sq:
 		req->execute = nvmet_vhost_create_sq;
+		req->data_len = 0;
+		return 0;
+	case nvme_admin_doorbell_memory:
+		req->execute = nvmet_vhost_set_db_memory;
 		req->data_len = 0;
 		return 0;
 	}
@@ -814,11 +919,11 @@ out_unlock:
 
 static int nvmet_vhost_set_eventfd(struct nvmet_vhost_ctrl *n, void __user *argp)
 {
-	struct nvmet_vhost_eventfd eventfd;
+	struct vhost_nvme_eventfd eventfd;
 	int num;
 	int ret;
 
-	ret = copy_from_user(&eventfd, argp, sizeof(struct nvmet_vhost_eventfd));
+	ret = copy_from_user(&eventfd, argp, sizeof(struct vhost_nvme_eventfd));
 	if (unlikely(ret))
 		return ret;
 
@@ -987,8 +1092,8 @@ static int nvmet_vhost_bar_write(struct nvmet_vhost_ctrl *n, int offset, u64 val
 
 static int nvmet_vhost_ioc_bar(struct nvmet_vhost_ctrl *n, void __user *argp)
 {
-	struct nvmet_vhost_bar bar;
-	struct nvmet_vhost_bar __user *user_bar = argp;
+	struct vhost_nvme_bar bar;
+	struct vhost_nvme_bar __user *user_bar = argp;
 	int ret = -EINVAL;
 
 	ret = copy_from_user(&bar, argp, sizeof(bar));

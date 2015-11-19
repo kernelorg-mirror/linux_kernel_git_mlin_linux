@@ -173,7 +173,7 @@ struct vhost_nvme_target {
 	char vhost_wwpn[224]; /* TRANSPORT_IQN_LEN */
 };
 
-struct nvmet_vhost_eventfd {
+struct vhost_nvme_eventfd {
 	int num;
 	int fd;
 	int *irq_enabled;
@@ -183,7 +183,7 @@ struct nvmet_vhost_eventfd {
 #define VHOST_NVME_BAR_READ 0
 #define VHOST_NVME_BAR_WRITE 1
 
-struct nvmet_vhost_bar {
+struct vhost_nvme_bar {
 	int type; /* read/write */
 	u64 offset;
 	unsigned size;
@@ -192,7 +192,7 @@ struct nvmet_vhost_bar {
 
 #define VHOST_NVME_SET_ENDPOINT _IOW(VHOST_VIRTIO, 0x45, struct vhost_nvme_target)
 #define VHOST_NVME_CLEAR_ENDPOINT _IOW(VHOST_VIRTIO, 0x46, struct vhost_nvme_target)
-#define VHOST_NVME_SET_EVENTFD _IOW(VHOST_VIRTIO, 0x47, struct nvmet_vhost_eventfd)
-#define VHOST_NVME_BAR _IOW(VHOST_VIRTIO, 0x48, struct nvmet_vhost_bar)
+#define VHOST_NVME_SET_EVENTFD _IOW(VHOST_VIRTIO, 0x47, struct vhost_nvme_eventfd)
+#define VHOST_NVME_BAR _IOW(VHOST_VIRTIO, 0x48, struct vhost_nvme_bar)
 
 #endif
