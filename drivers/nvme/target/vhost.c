@@ -539,12 +539,12 @@ static void nvmet_vhost_process_sq(struct nvmet_vhost_sq *sq)
 		}
 		iod->req.execute(&iod->req);
 		mutex_lock(&sq->lock);
+		nvmet_vhost_update_sq_eventidx(sq);
+		nvmet_vhost_update_sq_tail(sq);
         }
 
 unlock:
 	sq->scheduled = 0;
-	nvmet_vhost_update_sq_eventidx(sq);
-	nvmet_vhost_update_sq_tail(sq);
 	mutex_unlock(&sq->lock);
 	return;
 
