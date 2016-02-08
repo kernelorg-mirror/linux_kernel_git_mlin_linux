@@ -1,6 +1,10 @@
-config BLK_DEV_NVME
+config NVME_CORE
+	tristate
+
+config NVME_PCI
 	tristate "NVM Express block device"
 	depends on PCI && BLOCK
+	select NVME_CORE
 	---help---
 	  The NVM Express driver is for solid state drives directly
 	  connected to the PCI or PCI Express bus.  If you know you
@@ -9,9 +13,9 @@ config BLK_DEV_NVME
 	  To compile this driver as a module, choose M here: the
 	  module will be called nvme.
 
-config BLK_DEV_NVME_SCSI
+config NVME_SCSI
 	bool "SCSI emulation for NVMe device nodes"
-	depends on BLK_DEV_NVME
+	depends on NVME_CORE
 	---help---
 	  This adds support for the SG_IO ioctl on the NVMe character
 	  and block devices nodes, as well a a translation for a small
